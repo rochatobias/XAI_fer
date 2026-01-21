@@ -1,0 +1,27 @@
+# Ambientes
+venv/
+.env/
+
+# Python
+__pycache__/
+*.pyc
+
+# PyTorch / modelos
+*.pt
+*.pth
+*.ckpt
+
+# Resultados e outputs
+results/
+heatmaps/
+logs/
+
+# Jupyter
+.ipynb_checkpoints/
+
+# IDEs
+.idea/          # PyCharm / IntelliJ
+.vscode/        # VS Code
+
+# Sistema
+.DS_Store
