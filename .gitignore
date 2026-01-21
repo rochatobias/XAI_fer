@@ -1,32 +1,29 @@
-# Ambientes
-venv/
-.env/
-
-# Python
-__pycache__/
-*.pyc
-
-# PyTorch / modelos
-*.pt
-*.pth
-*.ckpt
-
-# Resultados e outputs
-results/
-heatmaps/
-logs/
-
-# Jupyter
-.ipynb_checkpoints/
-
-# IDEs
-.idea/          # PyCharm / IntelliJ
-.vscode/        # VS Code
-
-# Sistema
-.DS_Store
-
-AplicaçãoXAI
+# Datasets / mídia
+XAI/data/aplicaçãoXAI
+**/angry/
+**/disgust/
+**/fear/
+**/happy/
+**/neutral/
+**/sad/
+**/surprise/
 *.jpg
 *.jpeg
 *.png
+
+# Outputs grandes
+**/results/
+**/heatmaps/
+**/logs/
+**/Training/
+**/Models/
+
+# Python/IDE
+venv/
+.env/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.idea/
+.vscode/
+
