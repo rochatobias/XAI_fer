@@ -25,3 +25,8 @@ logs/
 
 # Sistema
 .DS_Store
+
+data/
+*.jpg
+*.jpeg
+*.png
