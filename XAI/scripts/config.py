@@ -6,13 +6,17 @@
 
 import os
 from pathlib import Path
+import torch
 
 # ==============================================================================
 # CONFIGURAÇÃO PRINCIPAL - MODIFIQUE AQUI
 # ==============================================================================
 
 # Número de imagens a processar (total, distribuído entre classes)
-N_SAMPLES = 2 # <- ALTERE AQUI PARA MUDAR O TAMANHO DA AMOSTRA
+N_SAMPLES = 1  # <- ALTERE AQUI PARA MUDAR O TAMANHO DA AMOSTRA
+
+# Número de imagens para métodos agnósticos (LIME/SHAP) - são mais lentos
+N_SAMPLES_AGNOSTIC = 1  # <- Para LIME/SHAP, pode ser diferente
 
 # ==============================================================================
 # CAMINHOS
@@ -20,9 +24,16 @@ N_SAMPLES = 2 # <- ALTERE AQUI PARA MUDAR O TAMANHO DA AMOSTRA
 
 # Diretório base do projeto
 BASE_DIR = Path(__file__).parent.parent  # XAI/
+PROJECT_ROOT = BASE_DIR.parent  # IC-Projeto/
 
-# Diretório do modelo ViT
-MODEL_DIR = str(BASE_DIR.parent / "Training" / "Models" / "ViT" / "deit_fold_5" / "best_checkpoint-45153")
+# Diretório do modelo ViT (best fold 5)
+VIT_MODEL_DIR = str(PROJECT_ROOT / "Training" / "Models" / "ViT" / "best_checkpoint-45153")
+
+# Diretório do modelo CNN (best fold 5)
+CNN_MODEL_PATH = str(PROJECT_ROOT / "Training" / "Models" / "CNN" / "convnext_fold_5_best.pth")
+
+# Alias para retrocompatibilidade
+MODEL_DIR = VIT_MODEL_DIR
 
 # Diretório dos dados para XAI
 DATA_DIR = str(BASE_DIR / "data" / "aplicaçãoXAI")
@@ -33,6 +44,7 @@ RESULTS_DIR = str(BASE_DIR / "results")
 # Subdiretórios de resultados
 HEATMAPS_DIR = os.path.join(RESULTS_DIR, "heatmaps")
 SUMMARY_DIR = os.path.join(RESULTS_DIR, "summary")
+ANALYSIS_DIR = os.path.join(RESULTS_DIR, "analysis")
 
 # ==============================================================================
 # PARÂMETROS DO MODELO E TRANSFORMAÇÕES
@@ -43,13 +55,31 @@ MEAN = (0.485, 0.456, 0.406)
 STD = (0.229, 0.224, 0.225)
 
 # ==============================================================================
-# CONFIGURAÇÃO XAI
+# CONFIGURAÇÃO XAI - ViT
 # ==============================================================================
 
-XAI_METHODS = ["Raw", "Rollout", "Flow"]
+VIT_XAI_METHODS = ["Raw", "Rollout", "Flow"]
+
+# Aliases para retrocompatibilidade
+XAI_METHODS = VIT_XAI_METHODS
+
 ROLLOUT_RESIDUAL_WEIGHT = 0.5
 FLOW_RESIDUAL_WEIGHT = 0.5
 FLOW_POWER = 2.0
+
+# ==============================================================================
+# CONFIGURAÇÃO XAI - CNN
+# ==============================================================================
+
+CNN_XAI_METHODS = ["GradCAM", "GradCAM++", "LayerCAM"]
+CNN_MODEL_NAME = "convnext_base"
+CNN_NUM_CLASSES = 7
+
+# ==============================================================================
+# CONFIGURAÇÃO XAI - Métodos Agnósticos (LIME/SHAP)
+# ==============================================================================
+
+AGNOSTIC_XAI_METHODS = ["LIME", "SHAP"]
 
 # ==============================================================================
 # CONFIGURAÇÃO DE MÉTRICAS
@@ -57,8 +87,16 @@ FLOW_POWER = 2.0
 
 AOPC_STEPS = (0.1, 0.2, 0.3, 0.5)
 INSERTION_DELETION_STEPS = tuple([i / 100 for i in range(0, 101, 5)])
-PERTURB_MODE = "mean"
+PERTURB_MODES = ["mean", "zero"]  # Ambos os baselines para AOPC
 AREA_ALPHAS = (0.50, 0.90)
+
+# ==============================================================================
+# CONFIGURAÇÃO DE ANÁLISE DE PESQUISA
+# ==============================================================================
+
+# Thresholds para filtros de confiança
+HIGH_CONFIDENCE_THRESHOLD = 0.9
+LOW_CONFIDENCE_THRESHOLD = 0.5
 
 # ==============================================================================
 # CLASSES DE EMOÇÕES
@@ -77,7 +115,6 @@ DEVICE = None
 
 def get_device():
     """Retorna o device a ser usado (cuda ou cpu)."""
-    import torch
     if DEVICE is not None:
         return torch.device(DEVICE)
     return torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -88,6 +125,10 @@ def create_results_dirs():
     os.makedirs(RESULTS_DIR, exist_ok=True)
     os.makedirs(HEATMAPS_DIR, exist_ok=True)
     os.makedirs(SUMMARY_DIR, exist_ok=True)
+    os.makedirs(ANALYSIS_DIR, exist_ok=True)
+    # Subpastas por modelo
+    os.makedirs(os.path.join(HEATMAPS_DIR, "vit"), exist_ok=True)
+    os.makedirs(os.path.join(HEATMAPS_DIR, "cnn"), exist_ok=True)
 
 
 def print_config():
@@ -96,77 +137,13 @@ def print_config():
     print("CONFIGURAÇÃO XAI")
     print("=" * 60)
     print(f"N_SAMPLES: {N_SAMPLES}")
-    print(f"MODEL_DIR: {MODEL_DIR}")
+    print(f"N_SAMPLES_AGNOSTIC: {N_SAMPLES_AGNOSTIC}")
+    print(f"VIT_MODEL_DIR: {VIT_MODEL_DIR}")
+    print(f"CNN_MODEL_PATH: {CNN_MODEL_PATH}")
     print(f"DATA_DIR: {DATA_DIR}")
     print(f"RESULTS_DIR: {RESULTS_DIR}")
     print(f"DEVICE: {get_device()}")
-    print(f"XAI_METHODS: {XAI_METHODS}")
+    print(f"VIT_XAI_METHODS: {VIT_XAI_METHODS}")
+    print(f"CNN_XAI_METHODS: {CNN_XAI_METHODS}")
+    print(f"AGNOSTIC_XAI_METHODS: {AGNOSTIC_XAI_METHODS}")
     print("=" * 60)
-
-# CNN XAI
-import os
-import numpy as np
-import pandas as pd
-from pathlib import Path
-from PIL import Image
-
-import torch
-import torch.nn.functional as F
-
-import timm
-from timm.data import resolve_model_data_config, create_transform
-
-import cv2
-import matplotlib.pyplot as plt
-
-# PATHS (AJUSTE AQUI)
-DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-
-
-# Modelo CNN + checkpoint do fold 5
-MODEL_NAME = "convnext_base"  # igual ao treino
-NUM_CLASSES = 7               # ajuste se necessário
-FOLD = 5
-
-# checkpoint best do fold 5 (no seu Drive/estrutura)
-CNN_CKPT_PATH = Path("/content/drive/MyDrive/cnn_fold_5/checkpoints/convnext_fold_5_best.pth")  # <-- ajuste
-
-# pasta para salvar figuras/resultados (opcional)
-OUT_DIR = Path("/content/cnn_xai_fold5")
-OUT_DIR.mkdir(parents=True, exist_ok=True)
-
-print("DEVICE:", DEVICE)
-print("CKPT exists:", CNN_CKPT_PATH.exists(), CNN_CKPT_PATH)
-print("OUT_DIR:", OUT_DIR)
-
-from torchvision import datasets
-from pathlib import Path
-import pandas as pd
-
-# =========================
-# AJUSTE O PATH DO DATASET
-# =========================
-DATASET_ROOT = Path("/content/test_dataset")
-# ou:
-# DATASET_ROOT = Path("/content/drive/MyDrive/dataset")
-
-assert DATASET_ROOT.exists(), f"Path não existe: {DATASET_ROOT}"
-
-# Carrega como ImageFolder
-img_ds = datasets.ImageFolder(str(DATASET_ROOT))
-
-print("Classes:", img_ds.classes)
-print("Total imagens:", len(img_ds))
-
-# Constrói df no MESMO formato do ViT
-rows = []
-for path, label in img_ds.samples:
-    rows.append({
-        "file": str(Path(path).resolve()),
-        "label": int(label)
-    })
-
-df = pd.DataFrame(rows)
-
-print(df.head())
-print("DF size:", len(df))

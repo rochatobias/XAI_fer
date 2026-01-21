@@ -15,8 +15,17 @@ XAI/data/aplicaçãoXAI
 **/results/
 **/heatmaps/
 **/logs/
-**/Training/
-**/Models/
+
+# Modelos/pesos grandes
+Training/Models/
+**/Training/Models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.ckpt
+*.onnx
+
 
 # Python/IDE
 venv/
@@ -24,6 +33,6 @@ venv/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-.idea/
+**.idea/
 .vscode/
 

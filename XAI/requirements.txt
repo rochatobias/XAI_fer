@@ -4,12 +4,29 @@
 # Install with: pip install -r requirements.txt
 # ==============================================================================
 
+# Core
 torch>=2.0.0
 torchvision>=0.15.0
 numpy>=1.24.0
 pandas>=2.0.0
+
+# Models
 transformers>=4.30.0
 timm>=0.9.0
+
+# Image Processing
 Pillow>=9.0.0
+
+# Visualization
 matplotlib>=3.7.0
-install timm grad-cam opencv-python
+
+# XAI Methods - CNN (CAM-based)
+grad-cam>=1.4.0
+
+# XAI Methods - Agnostic (optional, install if using LIME/SHAP)
+# pip install lime shap
+lime>=0.2.0
+shap>=0.42.0
+
+# Required by LIME
+scikit-image>=0.20.0
