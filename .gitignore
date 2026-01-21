@@ -26,7 +26,7 @@ logs/
 # Sistema
 .DS_Store
 
-data/
+AplicaçãoXAI
 *.jpg
 *.jpeg
 *.png
