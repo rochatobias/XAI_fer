@@ -54,15 +54,32 @@ def sample_images(images: List[Dict], n_samples: int = N_SAMPLES, seed: int = 42
         return random.sample(images, n_samples)
 
 
-def load_dataset(n_samples: Optional[int] = None, data_dir: str = DATA_DIR, balanced: bool = True, seed: int = 42) -> pd.DataFrame:
-    """Função principal para carregar o dataset."""
-    if n_samples is None:
-        n_samples = N_SAMPLES
+def load_dataset(n_samples: Optional[int] = None, data_dir: str = DATA_DIR, 
+                 balanced: bool = True, seed: int = 42,
+                 target_paths: Optional[List[str]] = None) -> pd.DataFrame:
+    """
+    Função principal para carregar o dataset.
+    
+    Args:
+        n_samples: Número de amostras (ignorado se target_paths fornecido)
+        target_paths: Lista de caminhos absolutos de imagens para carregar especificamente
+    """
     print(f"Carregando imagens de: {data_dir}")
     all_images = get_all_images(data_dir)
     print(f"Total de imagens encontradas: {len(all_images)}")
-    sampled = sample_images(all_images, n_samples, seed, balanced)
-    print(f"Imagens amostradas: {len(sampled)}")
+    
+    if target_paths is not None:
+        # Modo filtrado: carrega apenas as imagens especificadas
+        target_set = set(target_paths)
+        sampled = [img for img in all_images if img['path'] in target_set]
+        print(f"Imagens filtradas por lista de alvo: {len(sampled)}")
+    else:
+        # Modo amostragem normal
+        if n_samples is None:
+            n_samples = N_SAMPLES
+        sampled = sample_images(all_images, n_samples, seed, balanced)
+        print(f"Imagens amostradas: {len(sampled)}")
+        
     df = pd.DataFrame(sampled)
     print("\nDistribuição por classe:")
     for label in EMOTION_CLASSES:

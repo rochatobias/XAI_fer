@@ -70,6 +70,8 @@ FLOW_POWER = 2.0
 # ==============================================================================
 # CONFIGURAÇÃO XAI - CNN
 # ==============================================================================
+# LayerCAM é um bom equilíbrio entre velocidade e qualidade
+# ScoreCAM é mais robusto mas ~10x mais lento (inviável para 11k imagens)
 
 CNN_XAI_METHODS = ["GradCAM", "GradCAM++", "LayerCAM"]
 CNN_MODEL_NAME = "convnext_base"
@@ -105,12 +107,23 @@ LOW_CONFIDENCE_THRESHOLD = 0.5
 EMOTION_CLASSES = ["angry", "disgust", "fear", "happy", "neutral", "sad", "surprise"]
 
 # ==============================================================================
-# CONFIGURAÇÃO DE VISUALIZAÇÃO
+# CONFIGURAÇÃO DE VISUALIZAÇÃO E SELEÇÃO DE HEATMAPS
 # ==============================================================================
 
 FIGURE_DPI = 150
 OVERLAY_ALPHA = 0.35
 DEVICE = None
+
+# Estratégia de seleção de heatmaps para evitar sobrecarga de disco
+# 'all': Salva para todas as imagens (comportamento original)
+# 'stratified': Salva apenas amostras representativas (7 classes x 4 buckets)
+# 'none': Não salva heatmaps
+HEATMAP_SELECTION_STRATEGY = "stratified"  
+
+# Configuração da estratégia estratificada
+HEATMAPS_PER_CELL = 5     # Imagens por combinação (Classe x Bucket)
+PERCENTILE_HIGH = 80      # Percentil para alta confiança (P80)
+PERCENTILE_LOW = 20       # Percentil para baixa confiança (P20)
 
 
 def get_device():

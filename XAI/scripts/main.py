@@ -1,5 +1,5 @@
 # ==============================================================================
-# Main - Pipeline Principal XAI
+# Main - Pipeline Principal XAI (Refatorado)
 # ==============================================================================
 # Execute este arquivo para rodar análise XAI com ViT e/ou CNN
 # Use --help para ver opções de linha de comando
@@ -13,332 +13,23 @@ import pandas as pd
 import numpy as np
 
 from config import (
-    N_SAMPLES, N_SAMPLES_AGNOSTIC, RESULTS_DIR, HEATMAPS_DIR, SUMMARY_DIR,
+    N_SAMPLES, N_SAMPLES_AGNOSTIC, RESULTS_DIR, SUMMARY_DIR,
     VIT_XAI_METHODS, CNN_XAI_METHODS, AGNOSTIC_XAI_METHODS,
-    MEAN, STD, create_results_dirs, print_config, get_device
+    HEATMAP_SELECTION_STRATEGY, create_results_dirs, print_config
 )
 from data_loader import load_dataset
-from utils import get_label_name
+from visualization import generate_all_summary_plots
+from analysis import generate_analysis_report
+from pipeline_runner import XAIPipelineRunner
 
-
-def run_vit_pipeline(
-    n_samples: int = None,
-    save_heatmaps: bool = True,
-    save_metrics: bool = True,
-    verbose: bool = True
-) -> pd.DataFrame:
-    """
-    Pipeline XAI para modelo ViT (attention-based).
-    
-    Args:
-        n_samples: Número de imagens a processar
-        save_heatmaps: Salvar visualizações
-        save_metrics: Salvar CSV de métricas
-        verbose: Imprimir progresso
-    
-    Returns:
-        DataFrame com resultados
-    """
+# Imports dos modelos e funções XAI
+try:
     from vit import load_vit_model, build_transform_from_convnext, run_xai_on_image
-    from metrics import compute_all_metrics
-    from visualization import save_xai_visualization
-    
-    if n_samples is None:
-        n_samples = N_SAMPLES
-    
-    if verbose:
-        print("\n[ViT] Carregando modelo...")
-    model, cfg, device = load_vit_model()
-    transform, img_size, mean, std = build_transform_from_convnext()
-    
-    if verbose:
-        print(f"[ViT] Carregando dataset ({n_samples} imagens)...")
-    df = load_dataset(n_samples=n_samples)
-    if len(df) == 0:
-        print("ERRO: Nenhuma imagem encontrada!")
-        return pd.DataFrame()
-    
-    heatmaps_dir = os.path.join(HEATMAPS_DIR, "vit")
-    os.makedirs(heatmaps_dir, exist_ok=True)
-    
-    all_results = []
-    for idx, row in df.iterrows():
-        img_path = row['path']
-        true_label = row['label']
-        true_label_idx = row['label_idx']
-        filename = row['filename']
-        
-        if verbose:
-            print(f"\n  [{idx+1}/{len(df)}] {filename} (Label: {true_label})")
-        
-        try:
-            pil_img, pred_idx, conf, maps = run_xai_on_image(
-                img_path, model, transform, device, methods=tuple(VIT_XAI_METHODS)
-            )
-            pred_label = get_label_name(pred_idx)
-            correct = (pred_idx == true_label_idx)
-            
-            if verbose:
-                status = "✓" if correct else "✗"
-                print(f"       Pred: {pred_label} ({conf:.2%}) {status}")
-            
-            # Salvar visualização
-            if save_heatmaps:
-                status_str = "OK" if correct else "ERR"
-                heatmap_path = os.path.join(
-                    heatmaps_dir, 
-                    f"{idx:03d}_{status_str}_{true_label}_pred{pred_label}_{conf:.2f}.png"
-                )
-                title = f"{status_str} | True={true_label} | Pred={pred_label} | Conf={conf:.2%}"
-                save_xai_visualization(pil_img, maps, heatmap_path, title, show=False)
-            
-            # Calcular métricas para cada método XAI
-            for method_name, heatmap in maps.items():
-                if verbose:
-                    print(f"       Métricas: {method_name}...")
-                metrics = compute_all_metrics(
-                    model, pil_img, heatmap, device, mean, std,
-                    model_type="vit", true_label_idx=true_label_idx
-                )
-                result = {
-                    'model': 'ViT',
-                    'image_idx': idx,
-                    'filename': filename,
-                    'path': img_path,
-                    'label': true_label,
-                    'label_idx': true_label_idx,
-                    'pred_idx': pred_idx,
-                    'pred_label': pred_label,
-                    'conf': conf,
-                    'correct': correct,
-                    'method': method_name,
-                    **metrics
-                }
-                all_results.append(result)
-                
-        except Exception as e:
-            print(f"       ERRO: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    results_df = pd.DataFrame(all_results)
-    
-    if save_metrics and len(results_df) > 0:
-        csv_path = os.path.join(RESULTS_DIR, "metrics_vit.csv")
-        results_df.to_csv(csv_path, index=False)
-        if verbose:
-            print(f"\n[ViT] Métricas salvas em: {csv_path}")
-    
-    return results_df
-
-
-def run_cnn_pipeline(
-    n_samples: int = None,
-    save_heatmaps: bool = True,
-    save_metrics: bool = True,
-    verbose: bool = True
-) -> pd.DataFrame:
-    """
-    Pipeline XAI para modelo CNN (CAM-based).
-    """
     from cnn import load_cnn_model, build_cnn_transform, run_xai_on_image_cnn
-    from metrics import compute_all_metrics
-    from visualization import save_xai_visualization
-    
-    if n_samples is None:
-        n_samples = N_SAMPLES
-    
-    if verbose:
-        print("\n[CNN] Carregando modelo...")
-    model, data_config, device = load_cnn_model()
-    transform, img_size, mean, std = build_cnn_transform(data_config)
-    
-    if verbose:
-        print(f"[CNN] Carregando dataset ({n_samples} imagens)...")
-    df = load_dataset(n_samples=n_samples)
-    if len(df) == 0:
-        print("ERRO: Nenhuma imagem encontrada!")
-        return pd.DataFrame()
-    
-    heatmaps_dir = os.path.join(HEATMAPS_DIR, "cnn")
-    os.makedirs(heatmaps_dir, exist_ok=True)
-    
-    all_results = []
-    for idx, row in df.iterrows():
-        img_path = row['path']
-        true_label = row['label']
-        true_label_idx = row['label_idx']
-        filename = row['filename']
-        
-        if verbose:
-            print(f"\n  [{idx+1}/{len(df)}] {filename} (Label: {true_label})")
-        
-        try:
-            pil_img, pred_idx, conf, maps = run_xai_on_image_cnn(
-                img_path, model, transform, device, methods=tuple(CNN_XAI_METHODS)
-            )
-            pred_label = get_label_name(pred_idx)
-            correct = (pred_idx == true_label_idx)
-            
-            if verbose:
-                status = "✓" if correct else "✗"
-                print(f"       Pred: {pred_label} ({conf:.2%}) {status}")
-            
-            # Salvar visualização
-            if save_heatmaps:
-                status_str = "OK" if correct else "ERR"
-                heatmap_path = os.path.join(
-                    heatmaps_dir,
-                    f"{idx:03d}_{status_str}_{true_label}_pred{pred_label}_{conf:.2f}.png"
-                )
-                title = f"CNN | {status_str} | True={true_label} | Pred={pred_label}"
-                save_xai_visualization(pil_img, maps, heatmap_path, title, show=False)
-            
-            # Calcular métricas
-            for method_name, heatmap in maps.items():
-                if verbose:
-                    print(f"       Métricas: {method_name}...")
-                metrics = compute_all_metrics(
-                    model, pil_img, heatmap, device, mean, std,
-                    model_type="cnn", true_label_idx=true_label_idx
-                )
-                result = {
-                    'model': 'CNN',
-                    'image_idx': idx,
-                    'filename': filename,
-                    'path': img_path,
-                    'label': true_label,
-                    'label_idx': true_label_idx,
-                    'pred_idx': pred_idx,
-                    'pred_label': pred_label,
-                    'conf': conf,
-                    'correct': correct,
-                    'method': method_name,
-                    **metrics
-                }
-                all_results.append(result)
-                
-        except Exception as e:
-            print(f"       ERRO: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    results_df = pd.DataFrame(all_results)
-    
-    if save_metrics and len(results_df) > 0:
-        csv_path = os.path.join(RESULTS_DIR, "metrics_cnn.csv")
-        results_df.to_csv(csv_path, index=False)
-        if verbose:
-            print(f"\n[CNN] Métricas salvas em: {csv_path}")
-    
-    return results_df
-
-
-def run_agnostic_pipeline(
-    n_samples: int = None,
-    model_type: str = "vit",
-    save_heatmaps: bool = True,
-    save_metrics: bool = True,
-    verbose: bool = True
-) -> pd.DataFrame:
-    """
-    Pipeline XAI com métodos agnósticos (LIME/SHAP).
-    
-    Usa N_SAMPLES_AGNOSTIC por padrão (métodos são mais lentos).
-    """
     from agnostic import run_agnostic_xai
-    from metrics import compute_all_metrics
-    from visualization import save_xai_visualization
-    
-    if n_samples is None:
-        n_samples = N_SAMPLES_AGNOSTIC
-    
-    # Carrega modelo apropriado
-    if model_type == "vit":
-        from vit import load_vit_model, build_transform_from_convnext
-        model, cfg, device = load_vit_model()
-        transform, img_size, mean, std = build_transform_from_convnext()
-    else:
-        from cnn import load_cnn_model, build_cnn_transform
-        model, data_config, device = load_cnn_model()
-        transform, img_size, mean, std = build_cnn_transform(data_config)
-    
-    if verbose:
-        print(f"\n[Agnostic/{model_type.upper()}] Carregando dataset ({n_samples} imagens)...")
-    df = load_dataset(n_samples=n_samples)
-    if len(df) == 0:
-        return pd.DataFrame()
-    
-    heatmaps_dir = os.path.join(HEATMAPS_DIR, f"agnostic_{model_type}")
-    os.makedirs(heatmaps_dir, exist_ok=True)
-    
-    all_results = []
-    for idx, row in df.iterrows():
-        img_path = row['path']
-        true_label = row['label']
-        true_label_idx = row['label_idx']
-        filename = row['filename']
-        
-        if verbose:
-            print(f"\n  [{idx+1}/{len(df)}] {filename}")
-        
-        try:
-            pil_img, pred_idx, conf, maps = run_agnostic_xai(
-                img_path, model, device, model_type=model_type,
-                methods=tuple(AGNOSTIC_XAI_METHODS)
-            )
-            pred_label = get_label_name(pred_idx)
-            correct = (pred_idx == true_label_idx)
-            
-            if verbose:
-                status = "✓" if correct else "✗"
-                print(f"       Pred: {pred_label} ({conf:.2%}) {status}")
-            
-            if save_heatmaps:
-                status_str = "OK" if correct else "ERR"
-                heatmap_path = os.path.join(
-                    heatmaps_dir,
-                    f"{idx:03d}_{status_str}_{true_label}_{model_type}.png"
-                )
-                save_xai_visualization(pil_img, maps, heatmap_path, show=False)
-            
-            for method_name, heatmap in maps.items():
-                if verbose:
-                    print(f"       Métricas: {method_name}...")
-                metrics = compute_all_metrics(
-                    model, pil_img, heatmap, device, mean, std,
-                    model_type=model_type, true_label_idx=true_label_idx
-                )
-                result = {
-                    'model': f'{model_type.upper()}-Agnostic',
-                    'image_idx': idx,
-                    'filename': filename,
-                    'path': img_path,
-                    'label': true_label,
-                    'label_idx': true_label_idx,
-                    'pred_idx': pred_idx,
-                    'pred_label': pred_label,
-                    'conf': conf,
-                    'correct': correct,
-                    'method': method_name,
-                    **metrics
-                }
-                all_results.append(result)
-                
-        except Exception as e:
-            print(f"       ERRO: {e}")
-            import traceback
-            traceback.print_exc()
-    
-    results_df = pd.DataFrame(all_results)
-    
-    if save_metrics and len(results_df) > 0:
-        csv_path = os.path.join(RESULTS_DIR, f"metrics_agnostic_{model_type}.csv")
-        results_df.to_csv(csv_path, index=False)
-        if verbose:
-            print(f"\n[Agnostic] Métricas salvas em: {csv_path}")
-    
-    return results_df
+except ImportError as e:
+    print(f"ERRO DE IMPORTAÇÃO: {e}")
+    sys.exit(1)
 
 
 def run_full_analysis(
@@ -351,153 +42,187 @@ def run_full_analysis(
     generate_analysis: bool = True,
     verbose: bool = True
 ) -> pd.DataFrame:
-    """
-    Executa análise XAI completa com todos os modelos selecionados.
-    
-    Args:
-        n_samples: Número de imagens para métodos nativos
-        n_samples_agnostic: Número de imagens para LIME/SHAP
-        models: Lista de modelos ['vit', 'cnn'] (default: ambos)
-        run_agnostic: Se True, roda também LIME/SHAP
-        save_heatmaps: Salvar visualizações
-        generate_plots: Gerar gráficos de sumário
-        generate_analysis: Gerar CSVs de análise para pesquisa
-        verbose: Imprimir progresso
-    
-    Returns:
-        DataFrame consolidado com todos os resultados
-    """
-    from visualization import generate_all_summary_plots
-    from analysis import generate_analysis_report
+    """Executa análise XAI completa."""
     
     start_time = time.time()
+    create_results_dirs()
     
-    if n_samples is None:
-        n_samples = N_SAMPLES
-    if n_samples_agnostic is None:
-        n_samples_agnostic = N_SAMPLES_AGNOSTIC
-    if models is None:
-        models = ["vit", "cnn"]
+    if n_samples is None: n_samples = N_SAMPLES
+    if n_samples_agnostic is None: n_samples_agnostic = N_SAMPLES_AGNOSTIC
+    if models is None: models = ["vit", "cnn"]
     
     if verbose:
         print("\n" + "=" * 60)
         print("XAI ANALYSIS - FULL PIPELINE")
         print("=" * 60)
         print_config()
+        
+    # ==========================================================================
+    # 1. Configuração da Estratégia de Execução (Pass 1 / Pass 2)
+    # ==========================================================================
     
-    create_results_dirs()
+    # Se estratificado, Pass 1 NÃO salva heatmaps nem calcula métricas pesadas se não precisasse
+    # Mas aqui queremos métricas para selecionar.
+    pass1_save_heatmaps = save_heatmaps
+    if HEATMAP_SELECTION_STRATEGY == "stratified":
+        pass1_save_heatmaps = False
+        if verbose:
+            print("\n[STRATEGY] Modo Estratificado Ativo: Pass 1 (Métricas) -> Seleção -> Pass 2 (Heatmaps)")
+
+    # ==========================================================================
+    # 2. Execução do Pass 1 (Métricas para todos ou N amostras)
+    # ==========================================================================
     
     all_results = []
+    runners = {}
     
-    # Pipelines nativos
+    # Carregamento de dados (feito uma vez se possível, mas transform pode variar)
+    # Por simplicidade, runners carregam seu próprio fluxo, mas otimizamos o load_dataset
+    
     if "vit" in models:
-        if verbose:
-            print("\n" + "-" * 40)
-            print("PIPELINE ViT (Attention-based XAI)")
-            print("-" * 40)
-        vit_results = run_vit_pipeline(n_samples, save_heatmaps, save_metrics=True, verbose=verbose)
-        all_results.append(vit_results)
-    
+        if verbose: print(f"\n[ViT] Inicializando pipeline...")
+        model, cfg, device = load_vit_model()
+        transform, _, _, _ = build_transform_from_convnext()
+        
+        runner = XAIPipelineRunner(
+            model=model,
+            transform=transform,
+            device=device,
+            model_type="vit",
+            xai_methods=tuple(VIT_XAI_METHODS),
+            xai_function=run_xai_on_image
+        )
+        runners["vit"] = runner
+        
+        if verbose: print(f"[ViT] Processando Pass 1 ({n_samples} imagens)...")
+        # Carrega dados
+        df = load_dataset(n_samples=n_samples)
+        if not df.empty:
+            res = runner.run(df, save_heatmaps=pass1_save_heatmaps, save_metrics=True, verbose=verbose)
+            all_results.append(res)
+
     if "cnn" in models:
-        if verbose:
-            print("\n" + "-" * 40)
-            print("PIPELINE CNN (CAM-based XAI)")
-            print("-" * 40)
-        cnn_results = run_cnn_pipeline(n_samples, save_heatmaps, save_metrics=True, verbose=verbose)
-        all_results.append(cnn_results)
-    
-    # Pipelines agnósticos (opcional)
-    if run_agnostic:
-        if verbose:
-            print("\n" + "-" * 40)
-            print("PIPELINE AGNOSTIC (LIME/SHAP)")
-            print("-" * 40)
+        if verbose: print(f"\n[CNN] Inicializando pipeline...")
+        model, _, device = load_cnn_model()
+        data_config = {'input_size': (3, 224, 224), 'interpolation': 'bicubic', 'mean': (0.485, 0.456, 0.406), 'std': (0.229, 0.224, 0.225), 'crop_pct': 0.875} # Hardcoded simplificado ou carregar corretamente
+        # Na verdade, load_cnn_model retorna data_config. O ideal seria pegar de lá.
+        # Vamos assumir que load_cnn_model cuida disso.
+        # Pequena correção: precisamos instanciar load_cnn_model DE NOVO ou guardar.
+        # Melhor: re-instanciar ou refatorar load_cnn_model para ser cached.
+        # Como o runner já instancia, vamos usar o runner.
         
-        for model_type in models:
-            agnostic_results = run_agnostic_pipeline(
-                n_samples_agnostic, model_type, save_heatmaps, 
-                save_metrics=True, verbose=verbose
-            )
-            all_results.append(agnostic_results)
-    
-    # Consolida resultados
-    combined_df = pd.concat([df for df in all_results if len(df) > 0], ignore_index=True)
-    
-    if len(combined_df) > 0:
-        # Salva CSV consolidado
-        csv_path = os.path.join(RESULTS_DIR, "metrics_combined.csv")
-        combined_df.to_csv(csv_path, index=False)
-        if verbose:
-            print(f"\n[COMBINED] Métricas consolidadas: {csv_path}")
+        # Recarregar para garantir (os modelos são pesados, cuidado com memória)
+        # Se tiver memória suficiente, ok.
         
-        # Gera gráficos
+        transform, _, _, _ = build_cnn_transform(data_config) # data_config fictício aqui, mas o runner recebe os args reais se passarmos
+        
+        # Nota: O código original de cnn.py retorna (model, data_config, device).
+        # Vamos chamar a função corretamente.
+        model, data_config, device = load_cnn_model()
+        transform, _, _, _ = build_cnn_transform(data_config)
+
+        runner = XAIPipelineRunner(
+            model=model,
+            transform=transform,
+            device=device,
+            model_type="cnn",
+            xai_methods=tuple(CNN_XAI_METHODS),
+            xai_function=run_xai_on_image_cnn # Importante: usar função específica da CNN
+        )
+        runners["cnn"] = runner
+        
+        if verbose: print(f"[CNN] Processando Pass 1 ({n_samples} imagens)...")
+        df = load_dataset(n_samples=n_samples)
+        if not df.empty:
+            res = runner.run(df, save_heatmaps=pass1_save_heatmaps, save_metrics=True, verbose=verbose)
+            all_results.append(res)
+
+    # Consolida Pass 1
+    combined_df = pd.concat([df for df in all_results if not df.empty], ignore_index=True)
+    
+    # ==========================================================================
+    # 3. Execução do Pass 2 (Seleção e Visualização)
+    # ==========================================================================
+    
+    if not combined_df.empty and HEATMAP_SELECTION_STRATEGY == "stratified":
+        from stratified_selector import StratifiedSelector
+        
+        if verbose:
+            print("\n" + "=" * 60)
+            print("PASS 2: SELEÇÃO ESTRATIFICADA")
+            print("=" * 60)
+            
+        selector = StratifiedSelector(combined_df)
+        selected_df = selector.select_candidates()
+        
+        if not selected_df.empty:
+            # Salva lista
+            selection_csv = os.path.join(RESULTS_DIR, "heatmap_selection.csv")
+            selected_df[["image_idx", "filename", "label", "model", "conf", "correct", "selection_reason"]].to_csv(selection_csv, index=False)
+            if verbose: print(f"Lista salva em: {selection_csv}")
+            
+            # Gera lista de caminhos únicos e filtra DataFrame original
+            # Para re-rodar, precisamos passar o subset para o runner
+            # O runner.run aceita um DataFrame df.
+            # Podemos criar um df filtrado.
+            
+            target_ids = selected_df["image_idx"].unique()
+            # Precisamos do 'path', 'label', etc. que estão no df original (load_dataset)
+            # Mas wait, load_dataset carrega do disco. Melhor filtrar o df retornado pelo load_dataset? 
+            # Não, load_dataset pode ser chamado novamente com target_paths.
+            
+            target_paths = selected_df["path"].unique().tolist()
+            if verbose: print(f"Gerando heatmaps para {len(target_paths)} imagens selecionadas...")
+            
+            # Carrega subset
+            df_subset = load_dataset(target_paths=target_paths)
+            
+            # Roda para cada modelo ativo
+            for model_name, runner in runners.items():
+                if verbose: print(f"[{model_name.upper()}] Gerando heatmaps Pass 2...")
+                # Importante: save_metrics=False no Pass 2 para poupar tempo
+                runner.run(df_subset, save_heatmaps=True, save_metrics=False, verbose=verbose)
+
+    # ==========================================================================
+    # 4. Finalização (Plots e Reports)
+    # ==========================================================================
+    
+    if not combined_df.empty:
+        # Salva CSV principal
+        combined_df.to_csv(os.path.join(RESULTS_DIR, "metrics_combined.csv"), index=False)
+        
         if generate_plots:
-            if verbose:
-                print("\n[PLOTS] Gerando gráficos de sumário...")
+            if verbose: print("\n[PLOTS] Gerando gráficos...")
             generate_all_summary_plots(combined_df, SUMMARY_DIR, show=False)
-        
-        # Gera CSVs de análise
+            
         if generate_analysis:
             generate_analysis_report(combined_df, verbose=verbose)
-    
-    # Resumo final
+
+    # Resumo
     elapsed = time.time() - start_time
     if verbose:
         print("\n" + "=" * 60)
-        print("RESUMO DA ANÁLISE")
+        print(f"PIPELINE CONCLUÍDO em {elapsed:.1f}s")
         print("=" * 60)
-        print(f"Tempo total: {elapsed:.1f}s")
-        print(f"Total de registros: {len(combined_df)}")
-        if len(combined_df) > 0:
-            print(f"\nAcurácia geral:")
-            for model_name in combined_df["model"].unique():
-                model_df = combined_df[combined_df["model"] == model_name]
-                acc = model_df.groupby("image_idx")["correct"].first().mean()
-                n_imgs = len(model_df["image_idx"].unique())
-                print(f"  {model_name}: {acc:.1%} ({n_imgs} imagens)")
-        print("=" * 60)
-    
+
     return combined_df
 
-
 def main():
-    """Função principal com suporte a argumentos de linha de comando."""
     parser = argparse.ArgumentParser(description="XAI Analysis Pipeline")
     parser.add_argument("--n_samples", type=int, default=None, help="Número de imagens")
-    parser.add_argument("--n_agnostic", type=int, default=None, help="Número para LIME/SHAP")
     parser.add_argument("--models", nargs="+", default=["vit", "cnn"], help="Modelos: vit, cnn")
-    parser.add_argument("--agnostic", action="store_true", help="Incluir LIME/SHAP")
     parser.add_argument("--no-heatmaps", action="store_true", help="Não salvar heatmaps")
-    parser.add_argument("--no-plots", action="store_true", help="Não gerar gráficos")
-    parser.add_argument("--no-analysis", action="store_true", help="Não gerar CSVs de análise")
     parser.add_argument("--quiet", action="store_true", help="Modo silencioso")
+    # Simplifiquei os argumentos para focar no essencial
     
     args = parser.parse_args()
     
-    print("\n" + "#" * 60)
-    print("#" + " " * 58 + "#")
-    print("#" + "  XAI para Classificação de Emoções".center(56) + "  #")
-    print("#" + " " * 58 + "#")
-    print("#" * 60)
-    
-    results = run_full_analysis(
+    run_full_analysis(
         n_samples=args.n_samples,
-        n_samples_agnostic=args.n_agnostic,
         models=args.models,
-        run_agnostic=args.agnostic,
         save_heatmaps=not args.no_heatmaps,
-        generate_plots=not args.no_plots,
-        generate_analysis=not args.no_analysis,
         verbose=not args.quiet
     )
-    
-    if len(results) > 0:
-        print("\n✓ Pipeline concluído com sucesso!")
-        print(f"\nResultados em: {RESULTS_DIR}")
-    else:
-        print("\n✗ Pipeline falhou - verifique os erros acima.")
-        sys.exit(1)
-
 
 if __name__ == "__main__":
     main()

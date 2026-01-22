@@ -154,6 +154,54 @@ class XAIAnalyzer:
         
         return pd.DataFrame(stats)
     
+    def compute_model_discrepancies(self) -> pd.DataFrame:
+        """
+        Identifica imagens onde ViT e CNN divergem na predição.
+        
+        Muito útil para pesquisa: analisar XAI onde modelos discordam.
+        """
+        if "model" not in self.df.columns:
+            return pd.DataFrame()
+        
+        # Agrupa por imagem e modelo
+        pivot = self.df.groupby(["image_idx", "model"]).agg({
+            "filename": "first",
+            "label": "first",
+            "pred_label": "first",
+            "pred_idx": "first",
+            "conf": "first",
+            "correct": "first"
+        }).reset_index()
+        
+        # Pivot para ter ViT e CNN lado a lado
+        discrepancies = []
+        for img_idx in pivot["image_idx"].unique():
+            img_data = pivot[pivot["image_idx"] == img_idx]
+            
+            models_data = {}
+            for _, row in img_data.iterrows():
+                models_data[row["model"]] = row
+            
+            # Verifica se há discrepância
+            if len(models_data) >= 2:
+                model_names = list(models_data.keys())
+                pred_labels = [models_data[m]["pred_label"] for m in model_names]
+                
+                if len(set(pred_labels)) > 1:  # Predições diferentes
+                    first = models_data[model_names[0]]
+                    disc = {
+                        "image_idx": img_idx,
+                        "filename": first["filename"],
+                        "true_label": first["label"],
+                    }
+                    for m in model_names:
+                        disc[f"{m}_pred"] = models_data[m]["pred_label"]
+                        disc[f"{m}_conf"] = models_data[m]["conf"]
+                        disc[f"{m}_correct"] = models_data[m]["correct"]
+                    discrepancies.append(disc)
+        
+        return pd.DataFrame(discrepancies)
+    
     # ==========================================================================
     # Geração de CSVs
     # ==========================================================================
@@ -211,6 +259,17 @@ class XAIAnalyzer:
             generated["metrics_by_model"] = path
             if verbose:
                 print(f"  metrics_by_model: {len(stats_model)} modelos -> {path}")
+        
+        # 5. Discrepâncias ViT vs CNN
+        discrepancies = self.compute_model_discrepancies()
+        if len(discrepancies) > 0:
+            path = os.path.join(self.output_dir, "model_discrepancies.csv")
+            discrepancies.to_csv(path, index=False)
+            generated["model_discrepancies"] = path
+            if verbose:
+                print(f"  model_discrepancies: {len(discrepancies)} imagens -> {path}")
+        elif verbose:
+            print(f"  model_discrepancies: 0 discrepâncias (modelos concordam)")
         
         return generated
 
