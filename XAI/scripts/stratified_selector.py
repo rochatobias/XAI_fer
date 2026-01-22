@@ -1,9 +1,7 @@
-# ==============================================================================
-# Stratified Selector - Seleção Inteligente de Heatmaps
-# ==============================================================================
-# Seleciona imagens representativas para geração de heatmaps
-# Estratégia: 7 classes x 4 buckets (Confiança/Acerto) x N imagens
-# ==============================================================================
+"""Stratified Selector - Seleção Inteligente de Heatmaps.
+
+Estratégia: 7 classes x 4 buckets (Confiança/Acerto) x N imagens.
+"""
 
 import pandas as pd
 import numpy as np

@@ -1,9 +1,7 @@
-# ==============================================================================
-# Analysis - Geração de CSVs para Análise de Pesquisa
-# ==============================================================================
-# Filtra resultados por cenários de interesse (confiança alta/baixa, acertos/erros)
-# Gera estatísticas por método XAI e por classe de emoção
-# ==============================================================================
+"""Analysis - Geração de CSVs para Análise de Pesquisa.
+
+Filtra resultados por cenários de interesse e gera estatísticas por método XAI e classe.
+"""
 
 import os
 import pandas as pd

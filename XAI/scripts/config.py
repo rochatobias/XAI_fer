@@ -1,8 +1,7 @@
-# ==============================================================================
-# Configuração centralizada do projeto XAI
-# ==============================================================================
-# Modifique N_SAMPLES para controlar quantas imagens processar
-# ==============================================================================
+"""Configuração centralizada do projeto XAI.
+
+Modifique N_SAMPLES para controlar quantas imagens processar.
+"""
 
 import os
 from pathlib import Path

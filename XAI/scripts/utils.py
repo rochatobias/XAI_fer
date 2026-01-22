@@ -1,6 +1,4 @@
-# ==============================================================================
-# Utils - Funções Utilitárias
-# ==============================================================================
+"""Utils - Funções Utilitárias."""
 
 import pandas as pd
 from typing import Dict, Optional

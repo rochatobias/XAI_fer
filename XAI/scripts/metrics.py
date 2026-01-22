@@ -1,8 +1,7 @@
-# ==============================================================================
-# Metrics - Métricas de Avaliação XAI (Model-Agnostic)
-# ==============================================================================
-# Suporta tanto ViT (pixel_values) quanto CNN (forward direto)
-# ==============================================================================
+"""Metrics - Métricas de Avaliação XAI (Model-Agnostic).
+
+Suporta tanto ViT (pixel_values) quanto CNN (forward direto).
+"""
 
 import numpy as np
 import torch

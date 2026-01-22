@@ -1,6 +1,4 @@
-# ==============================================================================
-# Data Loader - Carregamento de dataset para XAI
-# ==============================================================================
+"""Data Loader - Carregamento de dataset para XAI."""
 
 import os
 import random

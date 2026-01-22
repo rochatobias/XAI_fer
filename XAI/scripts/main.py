@@ -1,9 +1,7 @@
-# ==============================================================================
-# Main - Pipeline Principal XAI (Refatorado)
-# ==============================================================================
-# Execute este arquivo para rodar análise XAI com ViT e/ou CNN
-# Use --help para ver opções de linha de comando
-# ==============================================================================
+"""Main - Pipeline Principal XAI.
+
+Execute: python main.py --help para ver opções.
+"""
 
 import os
 import sys
@@ -13,7 +11,7 @@ import pandas as pd
 import numpy as np
 
 from config import (
-    N_SAMPLES, N_SAMPLES_AGNOSTIC, RESULTS_DIR, SUMMARY_DIR,
+    N_SAMPLES, N_SAMPLES_AGNOSTIC, RESULTS_DIR, SUMMARY_DIR, HEATMAPS_DIR,
     VIT_XAI_METHODS, CNN_XAI_METHODS, AGNOSTIC_XAI_METHODS,
     HEATMAP_SELECTION_STRATEGY, create_results_dirs, print_config
 )
@@ -180,8 +178,62 @@ def run_full_analysis(
             # Roda para cada modelo ativo
             for model_name, runner in runners.items():
                 if verbose: print(f"[{model_name.upper()}] Gerando heatmaps Pass 2...")
-                # Importante: save_metrics=False no Pass 2 para poupar tempo
                 runner.run(df_subset, save_heatmaps=True, save_metrics=False, verbose=verbose)
+            
+            # ==========================================================================
+            # Pass 2.5: LIME/SHAP nas imagens selecionadas (opcional)
+            # ==========================================================================
+            if run_agnostic and AGNOSTIC_XAI_METHODS:
+                if verbose:
+                    print(f"\n[AGNOSTIC] Executando LIME/SHAP em {len(df_subset)} imagens...")
+                
+                from agnostic import run_agnostic_xai
+                from visualization import save_xai_visualization
+                
+                # Diretório para heatmaps agnósticos
+                agnostic_dir = os.path.join(HEATMAPS_DIR, "agnostic")
+                os.makedirs(agnostic_dir, exist_ok=True)
+                
+                # Usa o primeiro modelo disponível para LIME/SHAP
+                if "vit" in runners:
+                    agnostic_model = runners["vit"].model
+                    agnostic_device = runners["vit"].device
+                    agnostic_model_type = "vit"
+                elif "cnn" in runners:
+                    agnostic_model = runners["cnn"].model
+                    agnostic_device = runners["cnn"].device
+                    agnostic_model_type = "cnn"
+                else:
+                    agnostic_model = None
+                
+                if agnostic_model is not None:
+                    for idx, row in df_subset.iterrows():
+                        img_path = row['path']
+                        filename = row['filename']
+                        true_label = row['label']
+                        
+                        if verbose:
+                            print(f"  LIME/SHAP: {filename}...")
+                        
+                        try:
+                            pil_img, pred_idx, conf, agnostic_maps = run_agnostic_xai(
+                                img_path, agnostic_model, agnostic_device,
+                                model_type=agnostic_model_type,
+                                methods=tuple(AGNOSTIC_XAI_METHODS)
+                            )
+                            
+                            # Salva visualização
+                            from utils import get_label_name
+                            pred_label = get_label_name(pred_idx)
+                            status_str = "OK" if pred_label == true_label else "ERR"
+                            heatmap_filename = f"{idx:03d}_{status_str}_{true_label}_agnostic.png"
+                            heatmap_path = os.path.join(agnostic_dir, heatmap_filename)
+                            title = f"AGNOSTIC | {status_str} | True={true_label} | Pred={pred_label} | Conf={conf:.2%}"
+                            save_xai_visualization(pil_img, agnostic_maps, heatmap_path, title, show=False)
+                            
+                        except Exception as e:
+                            if verbose:
+                                print(f"    ERRO LIME/SHAP: {e}")
 
     # ==========================================================================
     # 4. Finalização (Plots e Reports)
@@ -212,14 +264,15 @@ def main():
     parser.add_argument("--n_samples", type=int, default=None, help="Número de imagens")
     parser.add_argument("--models", nargs="+", default=["vit", "cnn"], help="Modelos: vit, cnn")
     parser.add_argument("--no-heatmaps", action="store_true", help="Não salvar heatmaps")
+    parser.add_argument("--agnostic", action="store_true", help="Executar LIME/SHAP nas imagens selecionadas")
     parser.add_argument("--quiet", action="store_true", help="Modo silencioso")
-    # Simplifiquei os argumentos para focar no essencial
     
     args = parser.parse_args()
     
     run_full_analysis(
         n_samples=args.n_samples,
         models=args.models,
+        run_agnostic=args.agnostic,
         save_heatmaps=not args.no_heatmaps,
         verbose=not args.quiet
     )

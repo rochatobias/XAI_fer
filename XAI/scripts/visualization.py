@@ -1,8 +1,7 @@
-# ==============================================================================
-# Visualization - Funções de Visualização XAI
-# ==============================================================================
-# Heatmaps com colormap turbo (azul→amarelo) e threshold para fundo limpo
-# ==============================================================================
+"""Visualization - Funções de Visualização XAI.
+
+Heatmaps com colormap turbo (azul→amarelo) e threshold para fundo limpo.
+"""
 
 import os
 import numpy as np
@@ -167,21 +166,6 @@ def save_comparison_visualization(
         plt.show()
     else:
         plt.close()
-
-
-def generate_all_summary_plots(
-    results_df: pd.DataFrame,
-    output_dir: str,
-    show: bool = False
-) -> None:
-    """Gera gráficos de sumário dos resultados."""
-    os.makedirs(output_dir, exist_ok=True)
-    
-    _plot_metrics_by_method(results_df, output_dir, show)
-    _plot_confidence_distribution(results_df, output_dir, show)
-    _plot_accuracy_by_class(results_df, output_dir, show)
-    _plot_model_comparison(results_df, output_dir, show)
-    _plot_metrics_radar(results_df, output_dir, show)
 
 
 def _plot_metrics_by_method(df: pd.DataFrame, output_dir: str, show: bool = False) -> None:

@@ -1,9 +1,7 @@
-# ==============================================================================
-# Pipeline Runner - Execução genérica de pipelines XAI
-# ==============================================================================
-# Abstrai a lógica de loop, execução de XAI, heatmaps e métricas
-# para evitar duplicação de código entre modelos (ViT, CNN, etc.)
-# ==============================================================================
+"""Pipeline Runner - Execução genérica de pipelines XAI.
+
+Abstrai loop, execução XAI, heatmaps e métricas para evitar duplicação de código.
+"""
 
 import os
 import pandas as pd
@@ -118,11 +116,8 @@ class XAIPipelineRunner:
         
         results_df = pd.DataFrame(all_results)
         
-        # Salva CSV parcial se gerou métricas
         if save_metrics and not results_df.empty:
             csv_path = os.path.join(RESULTS_DIR, f"metrics_{self.model_type}.csv")
-            # Se já existir (em execuções parciais se fosse append), aqui estamos sobrescrevendo por enquanto
-            # Em um cenário real de append, teríamos que carregar e concat, mas aqui assumimos rodada única
             results_df.to_csv(csv_path, index=False)
             if verbose:
                 print(f"\n[{self.model_type.upper()}] Métricas salvas em: {csv_path}")

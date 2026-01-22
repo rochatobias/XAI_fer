@@ -1,6 +1,4 @@
-# ==============================================================================
-# ViT XAI - Métodos de Explicabilidade para Vision Transformers
-# ==============================================================================
+"""ViT XAI - Métodos de Explicabilidade para Vision Transformers."""
 
 import numpy as np
 import torch

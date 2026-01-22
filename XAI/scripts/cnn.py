@@ -1,6 +1,4 @@
-# ==============================================================================
-# CNN XAI - Métodos de Explicabilidade para ConvNeXt (CAM-based)
-# ==============================================================================
+"""CNN XAI - Métodos de Explicabilidade para ConvNeXt (CAM-based)."""
 
 import numpy as np
 import torch

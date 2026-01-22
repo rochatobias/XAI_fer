@@ -1,56 +1,168 @@
-# XAI Emotion Analysis Project
+# XAI para Reconhecimento de Emoções Faciais
 
-Este projeto implementa um pipeline completo de Explainable AI (XAI) para análise de modelos de classificação de emoções (ViT e CNN), com foco em comparar a fidelidade e localização de diferentes métodos de atribuição.
+Projeto de Explicabilidade (XAI) aplicada a modelos de reconhecimento de emoções faciais, comparando Vision Transformers (ViT) e ConvNeXt (CNN).
 
-## 🚀 Como Executar
+## 📋 Descrição
 
-### Pré-requisitos
-- Python 3.8+
-- PyTorch, Torchvision, TIMM
-- Matplotlib, Pandas, NumPy
+Este projeto implementa e compara métodos de explicabilidade para dois tipos de arquitetura:
 
-### Instalação
-```bash
-pip install -r requirements.txt
-```
+### Modelos
+- **ViT (Vision Transformer)**: Usando attention maps (Raw, Rollout, Flow)
+- **CNN (ConvNeXt)**: Usando métodos CAM (GradCAM, GradCAM++, LayerCAM)
 
-### Execução Rápida (Teste)
-Para verificar se tudo está funcionando (processa 1 imagem):
-```bash
-python scripts/main.py --n_samples 1
-```
+### Métodos XAI Agnósticos (Opcionais)
+- **LIME**: Local Interpretable Model-agnostic Explanations
+- **SHAP**: SHapley Additive exPlanations
 
-### Execução Completa (Pesquisa)
-Para rodar análise robusta, recomenda-se usar N=100 ou mais. O sistema usará a **Estratégia Two-Pass** para selecionar apenas os heatmaps mais relevantes (evitando salvar milhares de imagens).
+## 🚀 Instalação
 
 ```bash
-python scripts/main.py --n_samples 1000 --models vit cnn
+# Clone o repositório
+git clone <repo-url>
+cd IC-Projeto
+
+# Crie e ative um ambiente virtual
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# ou: venv\Scripts\activate  # Windows
+
+# Instale as dependências
+pip install -r XAI/requirements.txt
 ```
 
-## 🧠 Arquitetura e Estratégias
+## ⚙️ Configuração
 
-### Estratégia "Two-Pass" (Otimização)
-Para evitar o custo de I/O de salvar milhares de heatmaps inúteis:
-1.  **Passo 1**: Todo o dataset é processado para calcular métricas (AOPC, Confiança, Gini) e predições. Nenhuma imagem é salva.
-2.  **Seleção**: Um seletor estratificado (`stratified_selector.py`) escolhe ~140 casos representativos cobrindo 7 classes × 4 cenários (Alta Confiança Correta/Errada, Baixa Confiança Correta/Errada) com base nos percentis P80/P20.
-3.  **Passo 2**: Apenas as imagens selecionadas são re-processadas para gerar e salvar as visualizações finais.
+Edite `XAI/scripts/config.py` para ajustar:
 
-### Métricas Calculadas
-O pipeline calcula automaticamente:
-- **AOPC (Average Drop of Probability)**: Mede a fidelidade (quanto a remoção da área altera a predição).
-- **Insertion/Deletion AUC**: Mede a qualidade do ordenamento de importância dos pixels.
-- **Gini & Entropy**: Medem a dispersão/foco do heatmap.
-- **MPL Curve**: Curva de Proporção de Massa vs Área (localidade).
+```python
+N_SAMPLES = 100              # Número de imagens a processar
+N_SAMPLES_AGNOSTIC = 10      # Imagens para LIME/SHAP (são mais lentos)
+```
 
-## 📂 Estrutura de Pastas
+### Caminhos dos Modelos
+Os modelos treinados devem estar em:
+- ViT: `Training/Models/ViT/best_checkpoint-45153/`
+- CNN: `Training/Models/CNN/convnext_fold_5_best.pth`
 
-- `scripts/`: Código fonte.
-    - `main.py`: Ponto de entrada.
-    - `pipeline_runner.py`: Classe que gerencia a execução dos modelos.
-    - `metrics.py`: Implementação das métricas de XAI.
-    - `visualization.py`: Geração de plots e heatmaps (Turbo colormap).
-- `results/`: Saída do pipeline.
-    - `metrics_combined.csv`: Todas as métricas para todas as imagens.
-    - `heatmap_selection.csv`: Lista das imagens escolhidas para visualização.
-    - `heatmaps/`: As imagens geradas (ViT e CNN).
-    - `summary/`: Gráficos consolidados (Barras, Radar, Curvas).
+### Dados
+Coloque as imagens em `XAI/data/aplicaçãoXAI/` organizadas por classe:
+```
+aplicaçãoXAI/
+├── angry/
+├── disgust/
+├── fear/
+├── happy/
+├── neutral/
+├── sad/
+└── surprise/
+```
+
+## 🎯 Como Executar
+
+### Pipeline Completo
+```bash
+cd XAI/scripts
+python main.py --n_samples 100 --models vit cnn
+```
+
+### Com LIME/SHAP (nas imagens selecionadas)
+```bash
+python main.py --n_samples 100 --agnostic
+```
+
+### Apenas ViT
+```bash
+python main.py --models vit
+```
+
+### Apenas CNN
+```bash
+python main.py --models cnn
+```
+
+### Modo Silencioso
+```bash
+python main.py --quiet
+```
+
+## 📓 Notebook para Experimentos
+
+Use `XAI/experiments.ipynb` para testes individuais:
+- Carregar modelos ViT/CNN
+- Testar XAI em imagem única
+- Visualizar heatmaps inline
+- Calcular métricas
+
+## 📁 Estrutura do Projeto
+
+```
+IC-Projeto/
+├── Training/
+│   └── Models/
+│       ├── ViT/          # Checkpoint do ViT
+│       └── CNN/          # Peso do ConvNeXt
+├── XAI/
+│   ├── data/
+│   │   └── aplicaçãoXAI/ # Imagens para XAI
+│   ├── results/
+│   │   ├── heatmaps/     # Visualizações geradas
+│   │   │   ├── vit/
+│   │   │   ├── cnn/
+│   │   │   └── agnostic/
+│   │   ├── summary/      # Gráficos de resumo
+│   │   └── analysis/     # CSVs de análise
+│   ├── scripts/
+│   │   ├── main.py       # Pipeline principal
+│   │   ├── config.py     # Configurações
+│   │   ├── vit.py        # XAI para ViT
+│   │   ├── cnn.py        # XAI para CNN
+│   │   ├── agnostic.py   # LIME e SHAP
+│   │   ├── metrics.py    # Métricas de avaliação
+│   │   └── ...
+│   ├── experiments.ipynb # Notebook para testes
+│   └── requirements.txt
+└── README.md
+```
+
+## 📊 Métricas Calculadas
+
+### Fidelidade
+- **AOPC**: Average drop of Probability after perturbation
+- **Insertion AUC**: Área sob curva de inserção
+- **Deletion AUC**: Área sob curva de deleção
+
+### Localidade
+- **Area@50/90**: Fração de área para capturar 50%/90% da massa
+- **Gini**: Coeficiente de concentração
+- **Entropy**: Dispersão do heatmap
+
+## 🔧 Estratégia de Seleção
+
+O projeto usa seleção estratificada para heatmaps:
+- 7 classes × 4 buckets (alta/baixa confiança × acerto/erro)
+- Economiza espaço em disco
+- Garante representatividade
+
+## 📝 Resultados Gerados
+
+| Arquivo | Descrição |
+|---------|-----------|
+| `metrics_combined.csv` | Métricas de todos os modelos |
+| `heatmap_selection.csv` | Lista de imagens selecionadas |
+| `heatmaps/vit/*.png` | Heatmaps do ViT |
+| `heatmaps/cnn/*.png` | Heatmaps da CNN |
+| `heatmaps/agnostic/*.png` | Heatmaps LIME/SHAP |
+| `summary/*.png` | Gráficos de resumo |
+| `analysis/*.csv` | Análises por método/classe |
+
+## 📦 Dependências Principais
+
+- PyTorch ≥ 2.0
+- Transformers (HuggingFace)
+- timm
+- grad-cam
+- lime, shap (opcional)
+
+## 👤 Autor
+
+Tobias Rocha

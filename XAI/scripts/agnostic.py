@@ -1,9 +1,8 @@
-# ==============================================================================
-# Agnostic XAI - Métodos Model-Agnostic (LIME e SHAP)
-# ==============================================================================
-# Estes métodos são mais lentos mas funcionam com qualquer modelo.
-# Use N_SAMPLES_AGNOSTIC separado para controlar quantas imagens processar.
-# ==============================================================================
+"""Agnostic XAI - Métodos Model-Agnostic (LIME e SHAP).
+
+Métodos mais lentos mas funcionam com qualquer modelo.
+Use N_SAMPLES_AGNOSTIC para controlar o volume.
+"""
 
 import numpy as np
 import torch
