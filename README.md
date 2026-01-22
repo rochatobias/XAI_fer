@@ -1,53 +1,91 @@
 # XAI para Reconhecimento de Emoções Faciais
 
-Projeto de Explicabilidade (XAI) aplicada a modelos de reconhecimento de emoções faciais, comparando Vision Transformers (ViT) e ConvNeXt (CNN).
+Projeto de Explicabilidade (XAI) aplicada a modelos de deep learning para reconhecimento de emoções faciais, comparando Vision Transformers (ViT) e ConvNeXt (CNN).
 
-## 📋 Descrição
+## 📋 Objetivo da Pesquisa
 
-Este projeto implementa e compara métodos de explicabilidade para dois tipos de arquitetura:
+Investigar **onde** os modelos focam ao classificar emoções faciais, comparando:
+- **ViT**: Mecanismos de atenção (attention maps)
+- **CNN**: Métodos baseados em gradiente (CAM)
+- **Agnósticos**: LIME e SHAP (independentes de arquitetura)
 
-### Modelos
-- **ViT (Vision Transformer)**: Usando attention maps (Raw, Rollout, Flow)
-- **CNN (ConvNeXt)**: Usando métodos CAM (GradCAM, GradCAM++, LayerCAM)
+## 🧠 Decisões de Implementação
 
-### Métodos XAI Agnósticos (Opcionais)
-- **LIME**: Local Interpretable Model-agnostic Explanations
-- **SHAP**: SHapley Additive exPlanations
+### Por que Seleção Estratificada de Heatmaps?
+
+Processar milhares de imagens gera GBs de heatmaps. A **seleção estratificada** resolve isso:
+
+```
+7 classes × 4 buckets × 5 imagens = 140 heatmaps representativos
+```
+
+**Os 4 buckets capturam cenários de pesquisa importantes:**
+| Bucket | Descrição | Interesse |
+|--------|-----------|-----------|
+| `correct_high` | Acertou com confiança alta | Caso ideal |
+| `correct_low` | Acertou com confiança baixa | Possível sorte |
+| `wrong_high` | Errou com confiança alta | Caso problemático |
+| `wrong_low` | Errou com confiança baixa | Imagem ambígua |
+
+### Por que LIME/SHAP apenas nas imagens estratificadas?
+
+- LIME/SHAP são **~10-100x mais lentos** que métodos nativos
+- Objetivo: **comparar heatmaps** lado a lado (não calcular métricas)
+- Usar os mesmos 140 casos permite comparação direta ViT vs CNN vs LIME/SHAP
+
+### Por que LayerCAM ao invés de ScoreCAM?
+
+ScoreCAM é mais robusto mas **~10x mais lento** (inviável para datasets grandes). LayerCAM oferece bom equilíbrio velocidade/qualidade.
 
 ## 🚀 Instalação
 
 ```bash
 # Clone o repositório
-git clone <repo-url>
+git clone <https://github.com/rochatobias/XAI_fer.git>
 cd IC-Projeto
 
-# Crie e ative um ambiente virtual
+# Crie e ative ambiente virtual
 python -m venv venv
 source venv/bin/activate  # Linux/Mac
 # ou: venv\Scripts\activate  # Windows
 
-# Instale as dependências
+# Instale dependências
 pip install -r XAI/requirements.txt
 ```
 
 ## ⚙️ Configuração
 
-Edite `XAI/scripts/config.py` para ajustar:
+### Onde configurar os caminhos
+
+Edite `XAI/scripts/config.py`:
 
 ```python
-N_SAMPLES = 100              # Número de imagens a processar
-N_SAMPLES_AGNOSTIC = 10      # Imagens para LIME/SHAP (são mais lentos)
+# ============ MODELOS - MODIFIQUE AQUI SE NECESSÁRIO ============
+VIT_MODEL_DIR = str(PROJECT_ROOT / "Training" / "Models" / "ViT" / "best_checkpoint-45153")
+CNN_MODEL_PATH = str(PROJECT_ROOT / "Training" / "Models" / "CNN" / "convnext_fold_5_best.pth")
+
+# ============ DATASET - MODIFIQUE AQUI SE NECESSÁRIO ============
+DATA_DIR = str(BASE_DIR / "data" / "aplicaçãoXAI")
 ```
 
-### Caminhos dos Modelos
-Os modelos treinados devem estar em:
-- ViT: `Training/Models/ViT/best_checkpoint-45153/`
-- CNN: `Training/Models/CNN/convnext_fold_5_best.pth`
+### Requisitos dos Modelos
 
-### Dados
-Coloque as imagens em `XAI/data/aplicaçãoXAI/` organizadas por classe:
+> ⚠️ **IMPORTANTE**: Os modelos devem usar os mesmos parâmetros de pré-processamento do **ConvNeXt Base**:
+> - Input size: 224×224
+> - Mean: (0.485, 0.456, 0.406)
+> - Std: (0.229, 0.224, 0.225)
+
+Se treinou modelos com parâmetros diferentes, ajuste em `config.py`:
+```python
+IMG_SIZE = (224, 224)
+MEAN = (0.485, 0.456, 0.406)
+STD = (0.229, 0.224, 0.225)
 ```
-aplicaçãoXAI/
+
+### Estrutura esperada do dataset
+
+```
+XAI/data/aplicaçãoXAI/
 ├── angry/
 ├── disgust/
 ├── fear/
@@ -57,41 +95,66 @@ aplicaçãoXAI/
 └── surprise/
 ```
 
+### Parâmetros principais
+
+```python
+N_SAMPLES = 1000         # Imagens para métricas (ViT/CNN)
+N_SAMPLES_AGNOSTIC = 50  # Limite para LIME/SHAP (dentro do estratificado)
+```
+
 ## 🎯 Como Executar
 
-### Pipeline Completo
+### Pipeline completo (ViT + CNN)
 ```bash
 cd XAI/scripts
-python main.py --n_samples 100 --models vit cnn
+python main.py --n_samples 1000
 ```
 
-### Com LIME/SHAP (nas imagens selecionadas)
+### Com LIME/SHAP
 ```bash
-python main.py --n_samples 100 --agnostic
+python main.py --n_samples 1000 --agnostic
 ```
 
-### Apenas ViT
+### Apenas ViT ou CNN
 ```bash
 python main.py --models vit
-```
-
-### Apenas CNN
-```bash
 python main.py --models cnn
 ```
 
-### Modo Silencioso
+### Opções disponíveis
 ```bash
-python main.py --quiet
+python main.py --help
+
+--n_samples N       Número de imagens para métricas
+--models [vit/cnn]  Modelos a processar
+--agnostic          Executar LIME/SHAP nas imagens estratificadas
+--no-heatmaps       Não salvar visualizações
+--quiet             Modo silencioso
 ```
 
 ## 📓 Notebook para Experimentos
 
 Use `XAI/experiments.ipynb` para testes individuais:
-- Carregar modelos ViT/CNN
+- Carregar modelos
 - Testar XAI em imagem única
 - Visualizar heatmaps inline
-- Calcular métricas
+- Calcular métricas manualmente
+
+## 📊 Métricas Calculadas
+
+### Fidelidade (quão bem o heatmap explica a decisão)
+| Métrica | Descrição |
+|---------|-----------|
+| **AOPC** | Queda de confiança ao remover regiões importantes |
+| **Insertion AUC** | Confiança ao adicionar pixels importantes |
+| **Deletion AUC** | Confiança ao remover pixels importantes |
+
+### Localidade (concentração do heatmap)
+| Métrica | Descrição |
+|---------|-----------|
+| **Area@50/90** | % de área para capturar 50%/90% da atenção |
+| **Gini** | Coeficiente de concentração (maior = mais focado) |
+| **Entropy** | Dispersão (menor = mais focado) |
 
 ## 📁 Estrutura do Projeto
 
@@ -99,69 +162,49 @@ Use `XAI/experiments.ipynb` para testes individuais:
 IC-Projeto/
 ├── Training/
 │   └── Models/
-│       ├── ViT/          # Checkpoint do ViT
-│       └── CNN/          # Peso do ConvNeXt
+│       ├── ViT/              # Seu checkpoint ViT
+│       └── CNN/              # Seu peso ConvNeXt
 ├── XAI/
 │   ├── data/
-│   │   └── aplicaçãoXAI/ # Imagens para XAI
+│   │   └── aplicaçãoXAI/     # Dataset (7 pastas de emoções)
 │   ├── results/
-│   │   ├── heatmaps/     # Visualizações geradas
-│   │   │   ├── vit/
-│   │   │   ├── cnn/
-│   │   │   └── agnostic/
-│   │   ├── summary/      # Gráficos de resumo
-│   │   └── analysis/     # CSVs de análise
+│   │   ├── heatmaps/
+│   │   │   ├── vit/          # Heatmaps ViT
+│   │   │   ├── cnn/          # Heatmaps CNN
+│   │   │   └── agnostic/     # Heatmaps LIME/SHAP
+│   │   ├── summary/          # Gráficos de resumo
+│   │   └── analysis/         # CSVs de análise
 │   ├── scripts/
-│   │   ├── main.py       # Pipeline principal
-│   │   ├── config.py     # Configurações
-│   │   ├── vit.py        # XAI para ViT
-│   │   ├── cnn.py        # XAI para CNN
-│   │   ├── agnostic.py   # LIME e SHAP
-│   │   ├── metrics.py    # Métricas de avaliação
+│   │   ├── config.py         # ⚙️ Configurações (modifique aqui)
+│   │   ├── main.py           # Pipeline principal
+│   │   ├── vit.py            # XAI para ViT
+│   │   ├── cnn.py            # XAI para CNN
+│   │   ├── agnostic.py       # LIME e SHAP
 │   │   └── ...
-│   ├── experiments.ipynb # Notebook para testes
+│   ├── experiments.ipynb     # Notebook para testes
 │   └── requirements.txt
 └── README.md
 ```
 
-## 📊 Métricas Calculadas
-
-### Fidelidade
-- **AOPC**: Average drop of Probability after perturbation
-- **Insertion AUC**: Área sob curva de inserção
-- **Deletion AUC**: Área sob curva de deleção
-
-### Localidade
-- **Area@50/90**: Fração de área para capturar 50%/90% da massa
-- **Gini**: Coeficiente de concentração
-- **Entropy**: Dispersão do heatmap
-
-## 🔧 Estratégia de Seleção
-
-O projeto usa seleção estratificada para heatmaps:
-- 7 classes × 4 buckets (alta/baixa confiança × acerto/erro)
-- Economiza espaço em disco
-- Garante representatividade
-
-## 📝 Resultados Gerados
+##  Resultados Gerados
 
 | Arquivo | Descrição |
 |---------|-----------|
-| `metrics_combined.csv` | Métricas de todos os modelos |
-| `heatmap_selection.csv` | Lista de imagens selecionadas |
-| `heatmaps/vit/*.png` | Heatmaps do ViT |
-| `heatmaps/cnn/*.png` | Heatmaps da CNN |
-| `heatmaps/agnostic/*.png` | Heatmaps LIME/SHAP |
-| `summary/*.png` | Gráficos de resumo |
-| `analysis/*.csv` | Análises por método/classe |
+| `metrics_combined.csv` | Todas as métricas por imagem/método |
+| `heatmap_selection.csv` | Imagens selecionadas e motivo |
+| `heatmaps/vit/*.png` | Visualizações ViT |
+| `heatmaps/cnn/*.png` | Visualizações CNN |
+| `heatmaps/agnostic/*.png` | Visualizações LIME/SHAP |
+| `summary/*.png` | Gráficos comparativos |
+| `analysis/*.csv` | Estatísticas por método/classe |
 
-## 📦 Dependências Principais
+## 📦 Dependências
 
 - PyTorch ≥ 2.0
 - Transformers (HuggingFace)
 - timm
 - grad-cam
-- lime, shap (opcional)
+- lime, shap (para métodos agnósticos)
 
 ## 👤 Autor
 

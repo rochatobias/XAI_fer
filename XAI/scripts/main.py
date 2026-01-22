@@ -184,11 +184,20 @@ def run_full_analysis(
             # Pass 2.5: LIME/SHAP nas imagens selecionadas (opcional)
             # ==========================================================================
             if run_agnostic and AGNOSTIC_XAI_METHODS:
-                if verbose:
-                    print(f"\n[AGNOSTIC] Executando LIME/SHAP em {len(df_subset)} imagens...")
-                
                 from agnostic import run_agnostic_xai
                 from visualization import save_xai_visualization
+                from utils import get_label_name
+                
+                # Determina quantas imagens processar com LIME/SHAP
+                n_stratified = len(df_subset)
+                n_agnostic = min(n_samples_agnostic, n_stratified)
+                
+                if n_samples_agnostic > n_stratified:
+                    print(f"\n[AGNOSTIC] Aviso: N_SAMPLES_AGNOSTIC={n_samples_agnostic} > imagens estratificadas={n_stratified}")
+                    print(f"           Serão analisadas apenas {n_stratified} imagens (limite do estratificado)")
+                
+                if verbose:
+                    print(f"\n[AGNOSTIC] Executando LIME/SHAP em {n_agnostic} de {n_stratified} imagens...")
                 
                 # Diretório para heatmaps agnósticos
                 agnostic_dir = os.path.join(HEATMAPS_DIR, "agnostic")
@@ -207,13 +216,16 @@ def run_full_analysis(
                     agnostic_model = None
                 
                 if agnostic_model is not None:
-                    for idx, row in df_subset.iterrows():
+                    # Limita ao N_SAMPLES_AGNOSTIC
+                    df_agnostic = df_subset.head(n_agnostic)
+                    
+                    for i, (idx, row) in enumerate(df_agnostic.iterrows()):
                         img_path = row['path']
                         filename = row['filename']
                         true_label = row['label']
                         
                         if verbose:
-                            print(f"  LIME/SHAP: {filename}...")
+                            print(f"  [{i+1}/{n_agnostic}] LIME/SHAP: {filename}...")
                         
                         try:
                             pil_img, pred_idx, conf, agnostic_maps = run_agnostic_xai(
@@ -223,7 +235,6 @@ def run_full_analysis(
                             )
                             
                             # Salva visualização
-                            from utils import get_label_name
                             pred_label = get_label_name(pred_idx)
                             status_str = "OK" if pred_label == true_label else "ERR"
                             heatmap_filename = f"{idx:03d}_{status_str}_{true_label}_agnostic.png"

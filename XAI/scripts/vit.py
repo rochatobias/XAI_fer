@@ -12,7 +12,7 @@ from timm.data import resolve_model_data_config
 from typing import Tuple, Dict, Optional
 
 from config import (
-    MODEL_DIR, ROLLOUT_RESIDUAL_WEIGHT, FLOW_RESIDUAL_WEIGHT, 
+    VIT_MODEL_DIR, ROLLOUT_RESIDUAL_WEIGHT, FLOW_RESIDUAL_WEIGHT, 
     FLOW_POWER, OVERLAY_ALPHA, get_device
 )
 
@@ -36,7 +36,7 @@ def _normalize_01(x: np.ndarray, eps: float = 1e-8) -> np.ndarray:
     return (x - mn) / (mx - mn + eps)
 
 
-def load_vit_model(model_dir: str = MODEL_DIR, device: Optional[str] = None) -> Tuple:
+def load_vit_model(model_dir: str = VIT_MODEL_DIR, device: Optional[str] = None) -> Tuple:
     """Carrega o modelo ViT para classificação com suporte a atenções."""
     if device is None:
         device = get_device()

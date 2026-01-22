@@ -128,8 +128,3 @@ class StratifiedSelector:
         print(f"[SELEÇÃO] Selecionadas {n_unique} imagens únicas para heatmaps.")
         
         return final_selection
-
-    def save_selection_map(self, output_path: str):
-        """Salva um CSV explicando por que cada imagem foi selecionada."""
-        # TODO: Implementar se necessário, por enquanto o dataframe retornado já tem 'selection_reason'
-        pass
