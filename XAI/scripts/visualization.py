@@ -71,19 +71,27 @@ def save_xai_visualization(
     axes[0].axis("off")
     axes[0].set_title("Original")
     
-    # Heatmaps com colormap turbo
-    cmap = get_turbo_colormap() if use_threshold else plt.cm.turbo
-    
+    # Heatmaps - colormaps específicos para cada método
     for i, (name, heatmap) in enumerate(maps_dict.items(), 1):
         axes[i].imshow(img_np)
+        name_upper = name.upper()
         
-        if use_threshold:
-            masked_hm = create_masked_heatmap(heatmap)
-            axes[i].imshow(masked_hm, alpha=overlay_alpha, cmap=cmap, vmin=0, vmax=1)
+        # Colormaps e alphas específicos para métodos agnósticos
+        if name_upper == "LIME":
+            axes[i].imshow(heatmap, alpha=0.65, cmap="Greens", vmin=0, vmax=1)
+        elif name_upper == "SHAP":
+            # Visualização acadêmica: RdBu_r (vermelho=positivo, azul=negativo)
+            # Valores estão em [-1, 1], usamos escala simétrica
+            axes[i].imshow(heatmap, alpha=0.6, cmap="RdBu_r", vmin=-1, vmax=1)
         else:
-            # Sem threshold - normaliza e aplica diretamente
-            hm_norm = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
-            axes[i].imshow(hm_norm, alpha=overlay_alpha, cmap='turbo')
+            # ViT/CNN: usa turbo com threshold
+            cmap = get_turbo_colormap() if use_threshold else plt.cm.turbo
+            if use_threshold:
+                masked_hm = create_masked_heatmap(heatmap)
+                axes[i].imshow(masked_hm, alpha=overlay_alpha, cmap=cmap, vmin=0, vmax=1)
+            else:
+                hm_norm = (heatmap - heatmap.min()) / (heatmap.max() - heatmap.min() + 1e-8)
+                axes[i].imshow(hm_norm, alpha=overlay_alpha, cmap='turbo')
         
         axes[i].axis("off")
         axes[i].set_title(name)
@@ -295,31 +303,41 @@ def _plot_metrics_radar(df: pd.DataFrame, output_dir: str, show: bool = False) -
 
 
 def _plot_confidence_distribution(df: pd.DataFrame, output_dir: str, show: bool = False) -> None:
-    """Plota distribuição de confiança por acerto/erro."""
+    """Plota distribuição de confiança por acerto/erro, separado por modelo."""
     if "conf" not in df.columns or "correct" not in df.columns:
         return
     
-    df_unique = df.groupby("image_idx").agg({
+    # Agrupa por imagem e modelo para evitar duplicatas
+    df_unique = df.groupby(["image_idx", "model"]).agg({
         "conf": "first",
         "correct": "first"
     }).reset_index()
     
-    fig, ax = plt.subplots(figsize=(8, 5))
+    models = df_unique["model"].unique()
+    n_models = len(models)
     
-    correct_conf = df_unique[df_unique["correct"]]["conf"]
-    error_conf = df_unique[~df_unique["correct"]]["conf"]
+    fig, axes = plt.subplots(1, n_models, figsize=(6 * n_models, 5), sharey=True)
+    if n_models == 1:
+        axes = [axes]
     
-    ax.hist(correct_conf, bins=20, alpha=0.7, label=f"Correto (n={len(correct_conf)})", color="#2ecc71")
-    ax.hist(error_conf, bins=20, alpha=0.7, label=f"Erro (n={len(error_conf)})", color="#e74c3c")
+    for ax, model in zip(axes, models):
+        model_df = df_unique[df_unique["model"] == model]
+        correct_conf = model_df[model_df["correct"]]["conf"]
+        error_conf = model_df[~model_df["correct"]]["conf"]
+        
+        ax.hist(correct_conf, bins=20, alpha=0.7, label=f"Correto (n={len(correct_conf)})", color="#2ecc71")
+        ax.hist(error_conf, bins=20, alpha=0.7, label=f"Erro (n={len(error_conf)})", color="#e74c3c")
+        
+        ax.set_xlabel("Confiança", fontsize=12)
+        ax.set_title(f"{model}", fontsize=14)
+        ax.legend()
+        ax.grid(alpha=0.3)
     
-    ax.set_xlabel("Confiança", fontsize=12)
-    ax.set_ylabel("Frequência", fontsize=12)
-    ax.set_title("Distribuição de Confiança por Resultado", fontsize=14)
-    ax.legend()
-    ax.grid(alpha=0.3)
+    axes[0].set_ylabel("Frequência", fontsize=12)
+    fig.suptitle("Distribuição de Confiança por Resultado", fontsize=14, y=1.02)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "confidence_distribution.png"), dpi=FIGURE_DPI)
+    plt.savefig(os.path.join(output_dir, "confidence_distribution.png"), dpi=FIGURE_DPI, bbox_inches='tight')
     
     if show:
         plt.show()
@@ -329,38 +347,55 @@ def _plot_confidence_distribution(df: pd.DataFrame, output_dir: str, show: bool 
 
 
 def _plot_accuracy_by_class(df: pd.DataFrame, output_dir: str, show: bool = False) -> None:
-    """Plota acurácia por classe de emoção."""
-    if "label" not in df.columns or "correct" not in df.columns:
+    """Plota acurácia por classe de emoção, separado por modelo."""
+    if "label" not in df.columns or "correct" not in df.columns or "model" not in df.columns:
         return
     
-    df_unique = df.groupby("image_idx").agg({
+    # Agrupa por imagem e modelo
+    df_unique = df.groupby(["image_idx", "model"]).agg({
         "label": "first",
         "correct": "first"
     }).reset_index()
     
-    accuracy_by_class = df_unique.groupby("label")["correct"].mean()
+    models = sorted(df_unique["model"].unique())
+    classes = sorted(df_unique["label"].unique())
+    n_models = len(models)
     
-    fig, ax = plt.subplots(figsize=(10, 5))
+    fig, ax = plt.subplots(figsize=(12, 6))
     
-    classes = accuracy_by_class.index.tolist()
-    accuracies = accuracy_by_class.values
+    x = np.arange(len(classes))
+    width = 0.35
+    colors = {'VIT': '#3498db', 'CNN': '#e74c3c', 'ViT': '#3498db'}
     
-    colors = ['#3498db' if acc >= 0.7 else '#e74c3c' for acc in accuracies]
-    ax.bar(classes, accuracies, color=colors)
-    ax.axhline(y=accuracy_by_class.mean(), color="gray", linestyle="--", 
-               label=f"Média: {accuracy_by_class.mean():.1%}")
+    for i, model in enumerate(models):
+        model_df = df_unique[df_unique["model"] == model]
+        accuracies = [model_df[model_df["label"] == c]["correct"].mean() 
+                      if len(model_df[model_df["label"] == c]) > 0 else 0 
+                      for c in classes]
+        
+        offset = (i - (n_models - 1) / 2) * width
+        bars = ax.bar(x + offset, accuracies, width, label=model, 
+                      color=colors.get(model, f'C{i}'), alpha=0.85)
+        
+        # Adiciona valores nas barras
+        for j, (bar, acc) in enumerate(zip(bars, accuracies)):
+            ax.text(bar.get_x() + bar.get_width()/2, acc + 0.02, 
+                   f"{acc:.0%}", ha="center", fontsize=8, fontweight='bold')
+    
+    # Linha de média geral
+    overall_mean = df_unique["correct"].mean()
+    ax.axhline(y=overall_mean, color="gray", linestyle="--", 
+               label=f"Média Geral: {overall_mean:.1%}")
     
     ax.set_xlabel("Classe", fontsize=12)
     ax.set_ylabel("Acurácia", fontsize=12)
-    ax.set_title("Acurácia por Classe de Emoção", fontsize=14)
-    ax.set_ylim(0, 1.1)
-    ax.legend()
+    ax.set_title("Acurácia por Classe de Emoção (por Modelo)", fontsize=14)
+    ax.set_xticks(x)
+    ax.set_xticklabels(classes, rotation=45, ha="right")
+    ax.set_ylim(0, 1.15)
+    ax.legend(loc='upper right')
     ax.grid(axis='y', alpha=0.3)
     
-    for i, (c, acc) in enumerate(zip(classes, accuracies)):
-        ax.text(i, acc + 0.03, f"{acc:.0%}", ha="center", fontsize=10, fontweight='bold')
-    
-    plt.xticks(rotation=45, ha="right")
     plt.tight_layout()
     plt.savefig(os.path.join(output_dir, "accuracy_by_class.png"), dpi=FIGURE_DPI)
     

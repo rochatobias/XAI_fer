@@ -8,12 +8,16 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 from PIL import Image
-from typing import Tuple, Dict, Optional, Callable
+from typing import Tuple, Dict, Optional
 import warnings
 
 from config import IMG_SIZE, MEAN, STD, N_SAMPLES_AGNOSTIC, get_device
 
 EPS = 1e-12
+
+# Suprimir warnings do SHAP/tqdm para evitar poluição do console
+import warnings
+warnings.filterwarnings("ignore", category=UserWarning, module="shap")
 
 
 def _normalize_heatmap(hm: np.ndarray) -> np.ndarray:
@@ -28,10 +32,10 @@ def _normalize_heatmap(hm: np.ndarray) -> np.ndarray:
 class ModelWrapper:
     """
     Wrapper para adaptar modelos ViT/CNN para interfaces LIME/SHAP.
-    
+
     LIME e SHAP esperam funções que recebem arrays numpy e retornam probabilidades.
     """
-    
+
     def __init__(
         self,
         model: torch.nn.Module,
@@ -48,40 +52,43 @@ class ModelWrapper:
         self.std = torch.tensor(std, device=device).view(1, 3, 1, 1)
         self.img_size = img_size
         self.model.eval()
-    
+
     def predict_proba(self, images: np.ndarray) -> np.ndarray:
         """
         Prediz probabilidades para batch de imagens.
-        
+
         Args:
             images: Array de imagens [N, H, W, C] em [0, 255] ou [0, 1]
-        
+
         Returns:
             probs: Array [N, num_classes] de probabilidades
         """
         with torch.no_grad():
-            # Converte para tensor
+            # Aceita [H,W,C] ou [N,H,W,C]
+            if images.ndim == 3:
+                images = images[None, ...]
+
+            # Converte faixa para [0,1]
             if images.max() > 1.0:
                 images = images.astype(np.float32) / 255.0
-            
+            else:
+                images = images.astype(np.float32)
+
             # [N, H, W, C] -> [N, C, H, W]
-            x = torch.tensor(images, dtype=torch.float32, device=self.device)
-            if x.ndim == 3:
-                x = x.unsqueeze(0)
-            x = x.permute(0, 3, 1, 2)
-            
+            x = torch.tensor(images, dtype=torch.float32, device=self.device).permute(0, 3, 1, 2)
+
             # Normaliza
             x = (x - self.mean) / (self.std + EPS)
-            
+
             # Forward
             if self.model_type == "vit":
                 logits = self.model(pixel_values=x).logits
             else:
                 logits = self.model(x)
-            
+
             probs = F.softmax(logits, dim=-1).cpu().numpy()
             return probs
-    
+
     def __call__(self, images: np.ndarray) -> np.ndarray:
         return self.predict_proba(images)
 
@@ -96,86 +103,73 @@ def lime_explain(
     device: torch.device,
     model_type: str = "vit",
     target_class: Optional[int] = None,
-    num_samples: int = 1000,
-    num_features: int = 100
+    num_samples: int = 2500,
+    num_features: int = 20
 ) -> Tuple[np.ndarray, Dict]:
     """
     Gera explicação LIME para uma imagem.
-    
-    Args:
-        model: Modelo PyTorch
-        pil_img: Imagem PIL
-        device: Device
-        model_type: 'vit' ou 'cnn'
-        target_class: Classe alvo (None = classe predita)
-        num_samples: Número de perturbações para LIME
-        num_features: Número de superpixels a mostrar
-    
-    Returns:
-        heatmap: Heatmap 224x224 normalizado
-        info: Dicionário com informações adicionais
+
+    Retorna um heatmap contínuo (pesos por superpixel), melhor do que máscara binária.
+    Visual recomendado com colormap "Greens".
     """
     try:
         from lime import lime_image
-        from skimage.segmentation import quickshift
+        from skimage.segmentation import slic
     except ImportError:
-        raise ImportError("LIME não instalado. Execute: pip install lime")
-    
+        raise ImportError("LIME não instalado. Execute: pip install lime scikit-image")
+
     # Prepara imagem
     img = pil_img.convert("RGB").resize(IMG_SIZE)
     img_array = np.array(img)  # [H, W, C] em [0, 255]
-    
-    # Wrapper do modelo
+
     wrapper = ModelWrapper(model, device, model_type)
-    
-    # Cria explainer
     explainer = lime_image.LimeImageExplainer()
-    
-    # Gera explicação
+
+    def slic_segmentation(image):
+        return slic(image, n_segments=120, compactness=10, sigma=1, start_label=0)
+
     explanation = explainer.explain_instance(
         img_array,
         wrapper.predict_proba,
         top_labels=5,
         hide_color=0,
         num_samples=num_samples,
-        segmentation_fn=lambda x: quickshift(x, kernel_size=4, max_dist=200, ratio=0.2)
+        segmentation_fn=slic_segmentation
     )
-    
-    # Determina classe alvo
+
     if target_class is None:
         target_class = explanation.top_labels[0]
-    
-    # Obtém máscara de importância
-    _, mask = explanation.get_image_and_mask(
-        target_class,
-        positive_only=False,
-        num_features=num_features,
-        hide_rest=False
-    )
-    
-    # Converte máscara para heatmap contínuo
-    segments = explanation.segments
-    local_exp = dict(explanation.local_exp[target_class])
-    
-    heatmap = np.zeros(segments.shape, dtype=np.float32)
-    for segment_id, weight in local_exp.items():
-        heatmap[segments == segment_id] = weight
-    
-    # Normaliza
+
+    segments = explanation.segments  # [H, W]
+    sp_weights = dict(explanation.local_exp[target_class])  # {superpixel_id: weight}
+
+    heatmap = np.zeros_like(segments, dtype=np.float32)
+
+    pos = [(sp, w) for sp, w in sp_weights.items() if w > 0]
+    pos = sorted(pos, key=lambda t: t[1], reverse=True)[:num_features]
+
+    if len(pos) > 0:
+        ws = np.array([w for _, w in pos], dtype=np.float32)
+        wmin, wmax = float(ws.min()), float(ws.max())
+        scale = (wmax - wmin) + EPS
+        for sp_id, w in pos:
+            w01 = (float(w) - wmin) / scale
+            heatmap[segments == sp_id] = w01
+
     heatmap = _normalize_heatmap(heatmap)
-    
+
     info = {
         "target_class": target_class,
         "num_samples": num_samples,
         "num_features": num_features,
-        "top_labels": explanation.top_labels
+        "top_labels": list(explanation.top_labels),
+        "note": "lime_superpixel_weight_heatmap_positive_only"
     }
-    
     return heatmap, info
 
 
 # ==============================================================================
-# SHAP
+# SHAP (puro) - Shapley-based
 # ==============================================================================
 
 def shap_explain(
@@ -184,97 +178,89 @@ def shap_explain(
     device: torch.device,
     model_type: str = "vit",
     target_class: Optional[int] = None,
-    background_samples: int = 50,
-    method: str = "gradient"
+    max_evals: int = 1300,
+    algorithm: str = "partition",
+    masker: str = "blur(128,128)",
+    positive_only: bool = False  # False = padrão acadêmico (mostra pos/neg)
 ) -> Tuple[np.ndarray, Dict]:
     """
-    Gera explicação SHAP para uma imagem.
-    
-    Args:
-        model: Modelo PyTorch
-        pil_img: Imagem PIL
-        device: Device
-        model_type: 'vit' ou 'cnn'
-        target_class: Classe alvo (None = classe predita)
-        background_samples: Número de amostras de background
-        method: 'gradient' ou 'deep' (GradientExplainer ou DeepExplainer)
-    
+    Gera explicação SHAP (puro) para uma imagem usando a biblioteca shap.
+
+    Observações importantes:
+    - SHAP em imagem é caro. O 'partition' é o mais viável na prática.
+    - 'masker' controla como regiões ocultadas são preenchidas (blur costuma funcionar bem).
+    - Por padrão retornamos apenas contribuições positivas para melhorar legibilidade.
+
     Returns:
-        heatmap: Heatmap 224x224 normalizado
+        heatmap: Heatmap 224x224 normalizado [0,1]
         info: Dicionário com informações adicionais
     """
     try:
         import shap
     except ImportError:
         raise ImportError("SHAP não instalado. Execute: pip install shap")
-    
+
     # Prepara imagem
     img = pil_img.convert("RGB").resize(IMG_SIZE)
-    img_array = np.array(img, dtype=np.float32) / 255.0  # [H, W, C] em [0, 1]
-    
-    # Tensor normalizado
-    x = torch.tensor(img_array, dtype=torch.float32, device=device)
-    x = x.permute(2, 0, 1).unsqueeze(0)  # [1, C, H, W]
-    mean_t = torch.tensor(MEAN, device=device).view(1, 3, 1, 1)
-    std_t = torch.tensor(STD, device=device).view(1, 3, 1, 1)
-    x_norm = (x - mean_t) / (std_t + EPS)
-    
-    # Determina classe alvo se não especificada
-    model.eval()
-    with torch.no_grad():
-        if model_type == "vit":
-            logits = model(pixel_values=x_norm).logits
-        else:
-            logits = model(x_norm)
-        probs = F.softmax(logits, dim=-1).squeeze(0)
-        if target_class is None:
-            target_class = int(probs.argmax().item())
-    
-    # Gera background (imagens pretas ou ruído)
-    background = torch.zeros((background_samples, 3, *IMG_SIZE), device=device)
-    
-    # Cria função que aceita tensor e retorna logits da classe alvo
-    def model_fn(x_input):
-        if model_type == "vit":
-            return model(pixel_values=x_input).logits
-        else:
-            return model(x_input)
-    
-    try:
-        # Tenta GradientExplainer (mais rápido)
-        if method == "gradient":
-            explainer = shap.GradientExplainer(model_fn, background)
-            shap_values = explainer.shap_values(x_norm)
-        else:
-            # DeepExplainer
-            explainer = shap.DeepExplainer(model_fn, background)
-            shap_values = explainer.shap_values(x_norm)
-        
-        # shap_values é [num_classes, batch, C, H, W] ou [batch, C, H, W]
-        if isinstance(shap_values, list):
-            # Multi-output: pega classe alvo
-            sv = shap_values[target_class][0]  # [C, H, W]
-        else:
-            sv = shap_values[0]  # [C, H, W]
-        
-        # Agrega canais (soma absoluta)
-        heatmap = np.abs(sv).sum(axis=0)  # [H, W]
+    img_array = np.array(img, dtype=np.uint8)  # [H,W,C] em [0,255]
+
+    wrapper = ModelWrapper(model, device, model_type)
+
+    # Determina classe alvo (pela predição do modelo)
+    probs = wrapper.predict_proba(img_array[None, ...])[0]
+    pred_idx = int(np.argmax(probs))
+    if target_class is None:
+        target_class = pred_idx
+
+    # Masker de imagem: blur é o mais estável
+    # Ex: "blur(128,128)" ou "inpaint_telea"
+    img_masker = shap.maskers.Image(masker, img_array.shape)
+
+    # Explainer: algorithm="partition" é Shapley-based e muito mais rápido que kernel em imagem
+    explainer = shap.Explainer(wrapper.predict_proba, img_masker, algorithm=algorithm)
+
+    # Computa shap values para 1 imagem (silent=True evita barra de progresso interna atrasada)
+    sv = explainer(img_array[None, ...], max_evals=max_evals, silent=True)
+
+    # sv.values pode ser:
+    # (1, H, W, C, num_classes)  ou  (1, H, W, C) se o explainer reduzir saída
+    vals = sv.values
+
+    # Seleciona a classe alvo
+    if vals.ndim == 5:
+        # [N,H,W,C,K]
+        class_vals = vals[0, :, :, :, target_class]
+    elif vals.ndim == 4:
+        # [N,H,W,C] -> assume já é da classe explicada (menos comum)
+        class_vals = vals[0]
+    else:
+        raise RuntimeError(f"Formato inesperado de sv.values: {vals.shape}")
+
+    # Agrega canais -> [H,W]
+    heatmap = class_vals.sum(axis=-1).astype(np.float32)
+
+    # Opcional: apenas contribuições positivas
+    if positive_only:
+        heatmap = np.maximum(heatmap, 0.0)
         heatmap = _normalize_heatmap(heatmap)
-        
-        info = {
-            "target_class": target_class,
-            "method": method,
-            "background_samples": background_samples,
-            "confidence": float(probs[target_class].item())
-        }
-        
-        return heatmap, info
-        
-    except Exception as e:
-        warnings.warn(f"SHAP falhou: {e}. Retornando heatmap vazio.")
-        heatmap = np.zeros(IMG_SIZE, dtype=np.float32)
-        info = {"error": str(e), "target_class": target_class}
-        return heatmap, info
+    else:
+        # Normalização simétrica para visualização divergente (RdBu_r)
+        # Mantém positivos e negativos, normaliza para [-1, 1]
+        abs_max = max(abs(heatmap.min()), abs(heatmap.max())) + EPS
+        heatmap = heatmap / abs_max  # Agora em [-1, 1]
+
+    info = {
+        "target_class": int(target_class),
+        "pred_class": int(pred_idx),
+        "confidence": float(probs[target_class]),
+        "algorithm": algorithm,
+        "masker": masker,
+        "max_evals": int(max_evals),
+        "positive_only": bool(positive_only),
+        "note": "shap_partition_image"
+    }
+
+    return heatmap, info
 
 
 # ==============================================================================
@@ -290,14 +276,14 @@ def run_agnostic_xai(
 ) -> Tuple[Image.Image, int, float, Dict[str, np.ndarray]]:
     """
     Executa métodos XAI agnósticos (LIME/SHAP) em uma imagem.
-    
+
     Args:
         img_path: Caminho da imagem
         model: Modelo PyTorch
         device: Device
         model_type: 'vit' ou 'cnn'
         methods: Métodos a executar
-    
+
     Returns:
         pil_img: Imagem PIL
         pred_idx: Classe predita
@@ -305,15 +291,14 @@ def run_agnostic_xai(
         maps: Dicionário {método: heatmap_224x224}
     """
     pil_img = Image.open(img_path).convert("RGB").resize(IMG_SIZE)
-    
-    # Predição inicial
+
     wrapper = ModelWrapper(model, device, model_type)
     probs = wrapper.predict_proba(np.array(pil_img))[0]
     pred_idx = int(np.argmax(probs))
     conf = float(probs[pred_idx])
-    
-    maps = {}
-    
+
+    maps: Dict[str, np.ndarray] = {}
+
     for method in methods:
         method_lower = method.lower()
         try:
@@ -321,6 +306,8 @@ def run_agnostic_xai(
                 hm, _ = lime_explain(model, pil_img, device, model_type, target_class=pred_idx)
                 maps["LIME"] = hm
             elif method_lower == "shap":
+                # use N_SAMPLES_AGNOSTIC como "budget" padrão, se você quiser:
+                # max_evals = max(200, int(N_SAMPLES_AGNOSTIC))
                 hm, _ = shap_explain(model, pil_img, device, model_type, target_class=pred_idx)
                 maps["SHAP"] = hm
             else:
@@ -328,5 +315,5 @@ def run_agnostic_xai(
         except Exception as e:
             warnings.warn(f"Erro em {method}: {e}")
             maps[method] = np.zeros(IMG_SIZE, dtype=np.float32)
-    
+
     return pil_img, pred_idx, conf, maps

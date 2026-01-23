@@ -102,10 +102,10 @@ class XAIAnalyzer:
     
     def compute_stats_by_class(self) -> pd.DataFrame:
         """
-        Calcula média e desvio padrão das métricas por classe de emoção.
+        Calcula média e desvio padrão das métricas por classe de emoção, separado por modelo.
         
         Returns:
-            DataFrame com média e DP de cada métrica por classe
+            DataFrame com média e DP de cada métrica por (modelo, classe)
         """
         metric_cols = [c for c in self.df.columns if c in [
             "AOPC_mean", "AOPC_zero", "Insertion_AUC", "Deletion_AUC",
@@ -113,16 +113,20 @@ class XAIAnalyzer:
         ]]
         
         stats = []
-        for label in self.df["label"].unique():
-            class_df = self.df[self.df["label"] == label]
-            row = {"class": label}
-            row["n_samples"] = len(class_df["image_idx"].unique())
-            row["accuracy"] = class_df.groupby("image_idx")["correct"].first().mean()
-            for col in metric_cols:
-                if col in class_df.columns:
-                    row[f"{col}_mean"] = class_df[col].mean()
-                    row[f"{col}_std"] = class_df[col].std()
-            stats.append(row)
+        models = self.df["model"].unique() if "model" in self.df.columns else ["ALL"]
+        
+        for model in models:
+            model_df = self.df[self.df["model"] == model] if model != "ALL" else self.df
+            for label in model_df["label"].unique():
+                class_df = model_df[model_df["label"] == label]
+                row = {"model": model, "class": label}
+                row["n_samples"] = len(class_df["image_idx"].unique())
+                row["accuracy"] = class_df.groupby("image_idx")["correct"].first().mean()
+                for col in metric_cols:
+                    if col in class_df.columns:
+                        row[f"{col}_mean"] = class_df[col].mean()
+                        row[f"{col}_std"] = class_df[col].std()
+                stats.append(row)
         
         return pd.DataFrame(stats)
     

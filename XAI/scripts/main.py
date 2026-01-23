@@ -196,28 +196,20 @@ def run_full_analysis(
                     print(f"\n[AGNOSTIC] Aviso: N_SAMPLES_AGNOSTIC={n_samples_agnostic} > imagens estratificadas={n_stratified}")
                     print(f"           Serão analisadas apenas {n_stratified} imagens (limite do estratificado)")
                 
-                if verbose:
-                    print(f"\n[AGNOSTIC] Executando LIME/SHAP em {n_agnostic} de {n_stratified} imagens...")
+                # Limita ao N_SAMPLES_AGNOSTIC
+                df_agnostic = df_subset.head(n_agnostic)
                 
-                # Diretório para heatmaps agnósticos
-                agnostic_dir = os.path.join(HEATMAPS_DIR, "agnostic")
-                os.makedirs(agnostic_dir, exist_ok=True)
-                
-                # Usa o primeiro modelo disponível para LIME/SHAP
-                if "vit" in runners:
-                    agnostic_model = runners["vit"].model
-                    agnostic_device = runners["vit"].device
-                    agnostic_model_type = "vit"
-                elif "cnn" in runners:
-                    agnostic_model = runners["cnn"].model
-                    agnostic_device = runners["cnn"].device
-                    agnostic_model_type = "cnn"
-                else:
-                    agnostic_model = None
-                
-                if agnostic_model is not None:
-                    # Limita ao N_SAMPLES_AGNOSTIC
-                    df_agnostic = df_subset.head(n_agnostic)
+                # Roda LIME/SHAP para CADA modelo ativo
+                for model_name, runner in runners.items():
+                    if verbose:
+                        print(f"\n[AGNOSTIC-{model_name.upper()}] Executando LIME/SHAP em {n_agnostic} imagens...")
+                    
+                    # Diretório separado por modelo
+                    agnostic_model_dir = os.path.join(HEATMAPS_DIR, "agnostic", model_name)
+                    os.makedirs(agnostic_model_dir, exist_ok=True)
+                    
+                    agnostic_model = runner.model
+                    agnostic_device = runner.device
                     
                     for i, (idx, row) in enumerate(df_agnostic.iterrows()):
                         img_path = row['path']
@@ -225,12 +217,12 @@ def run_full_analysis(
                         true_label = row['label']
                         
                         if verbose:
-                            print(f"  [{i+1}/{n_agnostic}] LIME/SHAP: {filename}...")
+                            print(f"  [{i+1}/{n_agnostic}] LIME/SHAP ({model_name}): {filename}...")
                         
                         try:
                             pil_img, pred_idx, conf, agnostic_maps = run_agnostic_xai(
                                 img_path, agnostic_model, agnostic_device,
-                                model_type=agnostic_model_type,
+                                model_type=model_name,
                                 methods=tuple(AGNOSTIC_XAI_METHODS)
                             )
                             
@@ -238,8 +230,8 @@ def run_full_analysis(
                             pred_label = get_label_name(pred_idx)
                             status_str = "OK" if pred_label == true_label else "ERR"
                             heatmap_filename = f"{idx:03d}_{status_str}_{true_label}_agnostic.png"
-                            heatmap_path = os.path.join(agnostic_dir, heatmap_filename)
-                            title = f"AGNOSTIC | {status_str} | True={true_label} | Pred={pred_label} | Conf={conf:.2%}"
+                            heatmap_path = os.path.join(agnostic_model_dir, heatmap_filename)
+                            title = f"AGNOSTIC-{model_name.upper()} | {status_str} | True={true_label} | Pred={pred_label} | Conf={conf:.2%}"
                             save_xai_visualization(pil_img, agnostic_maps, heatmap_path, title, show=False)
                             
                         except Exception as e:
@@ -270,23 +262,339 @@ def run_full_analysis(
 
     return combined_df
 
+
+def run_agnostic_only(
+    models: list = None,
+    verbose: bool = True
+) -> None:
+    """
+    Executa apenas LIME/SHAP nas imagens já selecionadas pelo estratificado.
+    Lê o CSV existente e roda para todas as imagens únicas.
+    """
+    from tqdm import tqdm
+    
+    start_time = time.time()
+    create_results_dirs()
+    
+    if models is None:
+        models = ["vit", "cnn"]
+    
+    # Verifica se existe CSV de seleção
+    selection_csv = os.path.join(RESULTS_DIR, "heatmap_selection.csv")
+    if not os.path.exists(selection_csv):
+        print(f"ERRO: {selection_csv} não encontrado. Execute o pipeline completo primeiro.")
+        return
+    
+    if verbose:
+        print("\n" + "=" * 60)
+        print("AGNOSTIC-ONLY MODE: LIME/SHAP")
+        print("=" * 60)
+    
+    # Lê CSV e extrai caminhos únicos
+    selection_df = pd.read_csv(selection_csv)
+    unique_filenames = selection_df["filename"].unique().tolist()
+    
+    if verbose:
+        print(f"[AGNOSTIC] {len(unique_filenames)} filenames únicos no CSV")
+    
+    # Carrega TODAS as imagens do diretório e filtra pelos filenames
+    from data_loader import get_all_images
+    all_images = get_all_images()
+    
+    # Filtra pelas imagens selecionadas
+    filtered = [img for img in all_images if img["filename"] in unique_filenames]
+    df_agnostic = pd.DataFrame(filtered)
+    
+    # Adiciona image_idx do CSV original para manter consistência nos nomes
+    idx_map = selection_df.drop_duplicates("filename").set_index("filename")["image_idx"]
+    df_agnostic["image_idx"] = df_agnostic["filename"].map(idx_map)
+    
+    n_images = len(df_agnostic)
+    if verbose:
+        print(f"[AGNOSTIC] {n_images} imagens únicas para processar")
+    
+    # Carrega modelos e executa para cada um
+    for model_name in models:
+        if verbose:
+            print(f"\n[AGNOSTIC-{model_name.upper()}] Carregando modelo...")
+        
+        if model_name == "vit":
+            model, cfg, device = load_vit_model()
+        else:
+            model, data_config, device = load_cnn_model()
+        
+        agnostic_dir = os.path.join(HEATMAPS_DIR, "agnostic", model_name)
+        os.makedirs(agnostic_dir, exist_ok=True)
+        
+        if verbose:
+            print(f"[AGNOSTIC-{model_name.upper()}] Executando LIME/SHAP em {n_images} imagens...")
+        
+        # Loop com tqdm para progresso visual
+        for idx, row in tqdm(df_agnostic.iterrows(), total=n_images, 
+                             desc=f"LIME/SHAP ({model_name.upper()})", unit="img"):
+            img_path = row['path']
+            filename = row['filename']
+            true_label = row['label']
+            image_idx = row.get('image_idx', idx)
+            
+            try:
+                pil_img, pred_idx, conf, agnostic_maps = run_agnostic_xai(
+                    img_path, model, device,
+                    model_type=model_name,
+                    methods=tuple(AGNOSTIC_XAI_METHODS)
+                )
+                
+                from utils import get_label_name
+                from visualization import save_xai_visualization
+                
+                pred_label = get_label_name(pred_idx)
+                status_str = "OK" if pred_label == true_label else "ERR"
+                heatmap_filename = f"{image_idx:03d}_{status_str}_{true_label}_agnostic.png"
+                heatmap_path = os.path.join(agnostic_dir, heatmap_filename)
+                title = f"AGNOSTIC-{model_name.upper()} | {status_str} | True={true_label} | Pred={pred_label} | Conf={conf:.2%}"
+                save_xai_visualization(pil_img, agnostic_maps, heatmap_path, title, show=False)
+                
+            except Exception as e:
+                if verbose:
+                    tqdm.write(f"  ERRO {filename}: {e}")
+    
+    elapsed = time.time() - start_time
+    if verbose:
+        print(f"\n[AGNOSTIC] Concluído em {elapsed:.1f}s")
+        print(f"[AGNOSTIC] Heatmaps salvos em: {os.path.join(HEATMAPS_DIR, 'agnostic')}")
+
+# ==============================================================================
+# FUNÇÕES AUXILIARES PARA MENU INTERATIVO
+# ==============================================================================
+
+def run_plots_only(verbose: bool = True) -> None:
+    """Regenera apenas os gráficos a partir do CSV existente."""
+    csv_path = os.path.join(RESULTS_DIR, "metrics_combined.csv")
+    
+    if not os.path.exists(csv_path):
+        print(f"ERRO: {csv_path} não encontrado. Execute o pipeline primeiro.")
+        return
+    
+    if verbose:
+        print("\n[PLOTS] Carregando dados existentes...")
+    
+    df = pd.read_csv(csv_path)
+    
+    if verbose:
+        print(f"[PLOTS] {len(df)} registros carregados")
+        print(f"[PLOTS] Gerando gráficos em {SUMMARY_DIR}...")
+    
+    generate_all_summary_plots(df, SUMMARY_DIR, show=False)
+    
+    if verbose:
+        print(f"[PLOTS] Gráficos regenerados com sucesso!")
+
+
+def run_analysis_only(verbose: bool = True) -> None:
+    """Regenera apenas os CSVs de análise a partir do CSV existente."""
+    csv_path = os.path.join(RESULTS_DIR, "metrics_combined.csv")
+    
+    if not os.path.exists(csv_path):
+        print(f"ERRO: {csv_path} não encontrado. Execute o pipeline primeiro.")
+        return
+    
+    if verbose:
+        print("\n[ANALYSIS] Carregando dados existentes...")
+    
+    df = pd.read_csv(csv_path)
+    
+    if verbose:
+        print(f"[ANALYSIS] {len(df)} registros carregados")
+    
+    generate_analysis_report(df, verbose=verbose)
+    
+    if verbose:
+        print(f"[ANALYSIS] CSVs de análise regenerados!")
+
+
+def show_menu() -> None:
+    """Exibe menu principal."""
+    print("\n" + "═" * 60)
+    print("         XAI ANALYSIS - MENU PRINCIPAL")
+    print("═" * 60)
+    print()
+    print("  [1] Pipeline Completo (ViT + CNN)")
+    print("  [2] Pipeline Apenas ViT")
+    print("  [3] Pipeline Apenas CNN")
+    print("  [4] Executar LIME/SHAP (imagens estratificadas)")
+    print("  [5] Regenerar Gráficos (usa CSV existente)")
+    print("  [6] Regenerar CSVs de Análise")
+    print("  [0] Sair")
+    print()
+
+
+def prompt_int(prompt: str, default: int = None) -> int:
+    """Solicita um inteiro ao usuário."""
+    while True:
+        try:
+            default_str = f" [{default}]" if default else ""
+            user_input = input(f"{prompt}{default_str}: ").strip()
+            if not user_input and default is not None:
+                return default
+            return int(user_input)
+        except ValueError:
+            print("Por favor, digite um número inteiro.")
+
+
+def prompt_yes_no(prompt: str, default: bool = True) -> bool:
+    """Solicita confirmação sim/não."""
+    default_str = "S/n" if default else "s/N"
+    user_input = input(f"{prompt} [{default_str}]: ").strip().lower()
+    if not user_input:
+        return default
+    return user_input in ("s", "sim", "y", "yes")
+
+
+def run_interactive_menu() -> None:
+    """Executa o menu interativo."""
+    while True:
+        show_menu()
+        try:
+            choice = input("Escolha uma opção: ").strip()
+            
+            if choice == "0":
+                print("\nAté logo!")
+                break
+                
+            elif choice == "1":
+                # Pipeline completo ViT + CNN
+                n = prompt_int("Número de imagens para análise", N_SAMPLES)
+                agnostic = prompt_yes_no("Executar LIME/SHAP também?", False)
+                n_agnostic = None
+                if agnostic:
+                    n_agnostic = prompt_int("Número de imagens para LIME/SHAP", N_SAMPLES_AGNOSTIC)
+                
+                run_full_analysis(
+                    n_samples=n,
+                    n_samples_agnostic=n_agnostic,
+                    models=["vit", "cnn"],
+                    run_agnostic=agnostic,
+                    verbose=True
+                )
+                
+            elif choice == "2":
+                # Apenas ViT
+                n = prompt_int("Número de imagens para análise", N_SAMPLES)
+                run_full_analysis(n_samples=n, models=["vit"], verbose=True)
+                
+            elif choice == "3":
+                # Apenas CNN
+                n = prompt_int("Número de imagens para análise", N_SAMPLES)
+                run_full_analysis(n_samples=n, models=["cnn"], verbose=True)
+                
+            elif choice == "4":
+                # LIME/SHAP apenas
+                models_input = input("Modelos (vit, cnn ou ambos) [vit cnn]: ").strip()
+                if not models_input:
+                    models = ["vit", "cnn"]
+                else:
+                    models = models_input.split()
+                run_agnostic_only(models=models, verbose=True)
+                
+            elif choice == "5":
+                # Regenerar plots
+                run_plots_only(verbose=True)
+                
+            elif choice == "6":
+                # Regenerar análise
+                run_analysis_only(verbose=True)
+                
+            else:
+                print("Opção inválida. Tente novamente.")
+                
+        except KeyboardInterrupt:
+            print("\n\nOperação cancelada.")
+            break
+        except Exception as e:
+            print(f"\nErro: {e}")
+
+
 def main():
-    parser = argparse.ArgumentParser(description="XAI Analysis Pipeline")
-    parser.add_argument("--n_samples", type=int, default=None, help="Número de imagens")
-    parser.add_argument("--models", nargs="+", default=["vit", "cnn"], help="Modelos: vit, cnn")
-    parser.add_argument("--no-heatmaps", action="store_true", help="Não salvar heatmaps")
-    parser.add_argument("--agnostic", action="store_true", help="Executar LIME/SHAP nas imagens selecionadas")
-    parser.add_argument("--quiet", action="store_true", help="Modo silencioso")
+    """Função principal com suporte a CLI e menu interativo."""
+    
+    # Se não há argumentos, mostra menu interativo
+    if len(sys.argv) == 1:
+        run_interactive_menu()
+        return
+    
+    # Parse de argumentos CLI
+    parser = argparse.ArgumentParser(
+        description="XAI Analysis Pipeline para Reconhecimento de Emoções",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Exemplos:
+  python main.py                         # Menu interativo
+  python main.py --n_samples 100         # Pipeline completo com 100 imagens
+  python main.py --models vit            # Apenas ViT
+  python main.py --agnostic-only         # Apenas LIME/SHAP (usa CSV existente)
+  python main.py --plots-only            # Regenerar gráficos
+  python main.py --n_samples 50 --agnostic --n_agnostic 10  # Pipeline + LIME/SHAP
+        """
+    )
+    
+    # Argumentos de quantidade
+    parser.add_argument("--n_samples", "-n", type=int, default=None,
+                        help=f"Número de imagens para análise (default: {N_SAMPLES})")
+    parser.add_argument("--n_agnostic", type=int, default=None,
+                        help=f"Número de imagens para LIME/SHAP (default: {N_SAMPLES_AGNOSTIC})")
+    
+    # Argumentos de seleção de modelo
+    parser.add_argument("--models", "-m", nargs="+", default=["vit", "cnn"],
+                        choices=["vit", "cnn"],
+                        help="Modelos a processar (default: vit cnn)")
+    
+    # Flags de execução
+    parser.add_argument("--agnostic", "-a", action="store_true",
+                        help="Executar LIME/SHAP nas imagens estratificadas")
+    parser.add_argument("--agnostic-only", action="store_true",
+                        help="Executar APENAS LIME/SHAP (usa CSV existente)")
+    parser.add_argument("--plots-only", action="store_true",
+                        help="Regenerar apenas gráficos (usa CSV existente)")
+    parser.add_argument("--analysis-only", action="store_true",
+                        help="Regenerar apenas CSVs de análise")
+    
+    # Flags de controle
+    parser.add_argument("--no-heatmaps", action="store_true",
+                        help="Não salvar heatmaps visuais")
+    parser.add_argument("--no-plots", action="store_true",
+                        help="Não gerar gráficos de resumo")
+    parser.add_argument("--no-analysis", action="store_true",
+                        help="Não gerar CSVs de análise")
+    parser.add_argument("--quiet", "-q", action="store_true",
+                        help="Modo silencioso")
     
     args = parser.parse_args()
     
-    run_full_analysis(
-        n_samples=args.n_samples,
-        models=args.models,
-        run_agnostic=args.agnostic,
-        save_heatmaps=not args.no_heatmaps,
-        verbose=not args.quiet
-    )
+    # Executa a ação apropriada
+    if args.plots_only:
+        run_plots_only(verbose=not args.quiet)
+        
+    elif args.analysis_only:
+        run_analysis_only(verbose=not args.quiet)
+        
+    elif args.agnostic_only:
+        run_agnostic_only(
+            models=args.models,
+            verbose=not args.quiet
+        )
+        
+    else:
+        run_full_analysis(
+            n_samples=args.n_samples,
+            n_samples_agnostic=args.n_agnostic,
+            models=args.models,
+            run_agnostic=args.agnostic,
+            save_heatmaps=not args.no_heatmaps,
+            generate_plots=not args.no_plots,
+            generate_analysis=not args.no_analysis,
+            verbose=not args.quiet
+        )
+
 
 if __name__ == "__main__":
     main()

@@ -104,41 +104,96 @@ N_SAMPLES_AGNOSTIC = 50  # Limite para LIME/SHAP (dentro do estratificado)
 
 ## 🎯 Como Executar
 
-### Pipeline completo (ViT + CNN)
+### Menu Interativo (Recomendado)
+
+Execute sem argumentos para abrir o menu:
 ```bash
 cd XAI/scripts
+python main.py
+```
+
+```
+════════════════════════════════════════════════════════════
+         XAI ANALYSIS - MENU PRINCIPAL
+════════════════════════════════════════════════════════════
+
+  [1] Pipeline Completo (ViT + CNN)
+  [2] Pipeline Apenas ViT
+  [3] Pipeline Apenas CNN
+  [4] Executar LIME/SHAP (imagens estratificadas)
+  [5] Regenerar Gráficos (usa CSV existente)
+  [6] Regenerar CSVs de Análise
+  [0] Sair
+```
+
+O menu solicita interativamente a quantidade de imagens e outras opções.
+
+---
+
+### Via Linha de Comando (Flags)
+
+Para automação ou scripts, use as flags:
+
+#### Execução do Pipeline
+
+```bash
+# Pipeline completo (ViT + CNN) com 1000 imagens
 python main.py --n_samples 1000
+
+# Apenas ViT
+python main.py --models vit --n_samples 500
+
+# Apenas CNN
+python main.py --models cnn --n_samples 500
+
+# Com LIME/SHAP (10 imagens do estratificado)
+python main.py --n_samples 1000 --agnostic --n_agnostic 10
 ```
 
-### Com LIME/SHAP
+#### Regenerar Outputs (sem reprocessar)
+
 ```bash
-python main.py --n_samples 1000 --agnostic
+# Regenerar apenas gráficos
+python main.py --plots-only
+
+# Regenerar apenas CSVs de análise
+python main.py --analysis-only
+
+# Executar apenas LIME/SHAP (usa CSV existente)
+python main.py --agnostic-only
 ```
 
-### Apenas ViT ou CNN
+#### Flags de Controle
+
+| Flag | Alias | Descrição |
+|------|-------|-----------|
+| `--n_samples N` | `-n` | Número de imagens para análise |
+| `--n_agnostic N` | | Número de imagens para LIME/SHAP |
+| `--models [vit/cnn]` | `-m` | Modelos a processar |
+| `--agnostic` | `-a` | Executar LIME/SHAP nas imagens estratificadas |
+| `--agnostic-only` | | Apenas LIME/SHAP (usa CSV existente) |
+| `--plots-only` | | Regenerar apenas gráficos |
+| `--analysis-only` | | Regenerar apenas CSVs de análise |
+| `--no-heatmaps` | | Não salvar visualizações |
+| `--no-plots` | | Não gerar gráficos de resumo |
+| `--no-analysis` | | Não gerar CSVs de análise |
+| `--quiet` | `-q` | Modo silencioso |
+
+#### Exemplos Combinados
+
 ```bash
-python main.py --models vit
-python main.py --models cnn
+# Pipeline rápido para teste (10 imagens, só ViT, sem plots)
+python main.py -n 10 -m vit --no-plots --no-analysis
+
+# Pipeline completo com LIME/SHAP customizado
+python main.py --n_samples 5000 --agnostic --n_agnostic 50
+
+# Modo silencioso para scripts
+python main.py --n_samples 1000 --quiet
 ```
 
-### Opções disponíveis
-```bash
-python main.py --help
+---
 
---n_samples N       Número de imagens para métricas
---models [vit/cnn]  Modelos a processar
---agnostic          Executar LIME/SHAP nas imagens estratificadas
---no-heatmaps       Não salvar visualizações
---quiet             Modo silencioso
-```
-
-## 📓 Notebook para Experimentos
-
-Use `XAI/experiments.ipynb` para testes individuais:
-- Carregar modelos
-- Testar XAI em imagem única
-- Visualizar heatmaps inline
-- Calcular métricas manualmente
 
 ## 📊 Métricas Calculadas
 
