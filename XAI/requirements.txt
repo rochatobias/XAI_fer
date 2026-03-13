@@ -1,5 +1,5 @@
 # ==============================================================================
-# XAI Project Requirements
+# XAI-FER Project Requirements
 # ==============================================================================
 # Install with: pip install -r requirements.txt
 # ==============================================================================
@@ -19,12 +19,12 @@ Pillow>=9.0.0
 
 # Visualization
 matplotlib>=3.7.0
+tqdm>=4.60.0
 
-# XAI Methods - CNN (CAM-based)
+# XAI Methods — CNN (CAM-based)
 grad-cam>=1.4.0
 
-# XAI Methods - Agnostic (optional, install if using LIME/SHAP)
-# pip install lime shap
+# XAI Methods — Agnostic (LIME/SHAP)
 lime>=0.2.0
 shap>=0.42.0
 
